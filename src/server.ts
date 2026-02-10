@@ -7,6 +7,25 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
+// Basic root/health endpoints for platform checks
+app.get('/', (req, res) => {
+    res.json({
+        status: 'ok',
+        service: 'baileys-api',
+        endpoints: [
+            'POST /sessions/:id',
+            'GET /sessions',
+            'GET /sessions/:id/qr',
+            'POST /messages/send',
+            'DELETE /sessions/:id'
+        ]
+    });
+});
+
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok' });
+});
+
 // Create or get status of a session
 app.post('/sessions/:id', async (req, res) => {
     const { id } = req.params;

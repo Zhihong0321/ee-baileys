@@ -1,8 +1,32 @@
 import express from 'express';
+import path from 'path';
 import { manager } from '../whatsapp/SocketManager';
 
 const app = express();
 app.use(express.json());
+
+// Serve the dashboard UI
+const publicDir = path.join(process.cwd(), 'public');
+app.use(express.static(publicDir));
+
+// Basic API info/health endpoints
+app.get('/api', (req, res) => {
+    res.json({
+        status: 'ok',
+        service: 'baileys-multi-api',
+        endpoints: [
+            'POST /sessions/:id',
+            'GET /sessions',
+            'GET /sessions/:id/qr',
+            'POST /messages/send',
+            'DELETE /sessions/:id'
+        ]
+    });
+});
+
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok' });
+});
 
 // Init or Get status
 app.post('/sessions/:id', async (req, res) => {
@@ -25,6 +49,17 @@ app.post('/sessions/:id', async (req, res) => {
 // List
 app.get('/sessions', (req, res) => {
     res.json({ sessions: manager.listInstances() });
+});
+
+// Get QR for a session
+app.get('/sessions/:id/qr', (req, res) => {
+    manager.getInstance(req.params.id).then(instance => {
+        const qr = instance.getQRCode();
+        if (!qr) return res.status(404).json({ error: 'QR not ready or already connected' });
+        res.json({ qr });
+    }).catch((err: any) => {
+        res.status(500).json({ error: err.message });
+    });
 });
 
 // Send Message (The main endpoint for AI)

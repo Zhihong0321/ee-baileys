@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Baileys API Dashboard</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js" defer></script>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Baileys Multi-API</p>
+        <h1>WhatsApp API Dashboard</h1>
+        <p class="subtitle">Create sessions, scan QR codes, and send messages from one place.</p>
+      </div>
+      <div class="status-pill" id="serverStatus">Checking server…</div>
+    </header>
+
+    <section class="card">
+      <h2>Session Control</h2>
+      <div class="grid">
+        <label class="field">
+          <span>Session ID</span>
+          <input id="sessionId" type="text" placeholder="e.g. agent-01" />
+        </label>
+        <div class="actions">
+          <button id="createSession">Create / Init</button>
+          <button id="refreshQr" class="ghost">Refresh QR</button>
+          <button id="deleteSession" class="danger">Logout</button>
+        </div>
+      </div>
+
+      <div class="qr-wrap">
+        <div class="qr-box" id="qrBox">
+          <span class="muted">QR will appear here</span>
+        </div>
+        <div class="qr-info">
+          <p id="sessionStatus" class="muted">No session yet.</p>
+          <p class="muted">Scan the QR with WhatsApp to connect.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Send Message</h2>
+      <div class="grid">
+        <label class="field">
+          <span>Session ID</span>
+          <input id="msgSessionId" type="text" placeholder="agent-01" />
+        </label>
+        <label class="field">
+          <span>To (phone number)</span>
+          <input id="msgTo" type="text" placeholder="14155552671" />
+        </label>
+        <label class="field">
+          <span>Message</span>
+          <textarea id="msgText" rows="3" placeholder="Hello from Baileys…"></textarea>
+        </label>
+        <div class="actions">
+          <button id="sendMessage">Send</button>
+        </div>
+      </div>
+      <pre class="log" id="messageLog"></pre>
+    </section>
+
+    <section class="card">
+      <h2>Active Sessions</h2>
+      <div class="actions">
+        <button id="refreshSessions" class="ghost">Refresh List</button>
+      </div>
+      <ul id="sessionList" class="list"></ul>
+    </section>
+  </main>
+</body>
+</html>
