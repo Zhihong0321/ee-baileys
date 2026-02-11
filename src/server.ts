@@ -1,6 +1,7 @@
 import express from 'express';
 import { sessionManager } from './whatsapp';
 import dotenv from 'dotenv';
+import QRCode from 'qrcode';
 
 dotenv.config();
 
@@ -32,12 +33,14 @@ app.post('/sessions/:id', async (req, res) => {
     try {
         await sessionManager.initSession(id);
         const qr = sessionManager.getQR(id);
+        const qrImage = sessionManager.getQRImage(id);
         const isConnected = !!(await sessionManager.getSession(id));
 
         res.json({
             sessionId: id,
             status: isConnected ? 'connected' : 'initializing',
             qr: qr || null,
+            qrImage: qrImage || null,
             message: qr ? 'Scan this QR code' : (isConnected ? 'Already connected' : 'Initializing signal')
         });
     } catch (err: any) {

@@ -14,6 +14,7 @@ import pino from 'pino';
 import { deduper } from '../lib/Deduper';
 import { dispatchWebhook, formatMessage } from '../utils/webhook';
 import { Mutex } from 'async-mutex';
+import QRCode from 'qrcode';
 
 const logger = pino({ level: 'info' });
 
@@ -57,7 +58,13 @@ export class WhatsAppInstance {
             this.qr = qr;
 
             if (qr) {
-                dispatchWebhook({ sessionId: this.sessionId, event: 'qr', data: { qr } });
+                try {
+                    const qrImage = await QRCode.toDataURL(qr);
+                    dispatchWebhook({ sessionId: this.sessionId, event: 'qr', data: { qr, qrImage } });
+                } catch (err) {
+                    console.error('Error generating QR DataURL:', err);
+                    dispatchWebhook({ sessionId: this.sessionId, event: 'qr', data: { qr } });
+                }
             }
 
             if (connection === 'close') {

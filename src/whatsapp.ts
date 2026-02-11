@@ -11,12 +11,14 @@ import path from 'path';
 import fs from 'fs-extra';
 import pino from 'pino';
 import { dispatchWebhook } from './webhooks';
+import QRCode from 'qrcode';
 
 const logger = pino({ level: 'info' });
 
 export class SessionManager {
     private sessions: Map<string, WASocket> = new Map();
     private qrCodes: Map<string, string> = new Map();
+    private qrImages: Map<string, string> = new Map();
     private sessionsDir: string;
 
     constructor() {
@@ -43,11 +45,17 @@ export class SessionManager {
             logger,
         });
 
-        sock.ev.on('connection.update', (update: Partial<ConnectionState>) => {
+        sock.ev.on('connection.update', async (update: Partial<ConnectionState>) => {
             const { connection, lastDisconnect, qr } = update;
 
             if (qr) {
                 this.qrCodes.set(sessionId, qr);
+                try {
+                    const qrImage = await QRCode.toDataURL(qr);
+                    this.qrImages.set(sessionId, qrImage);
+                } catch (err) {
+                    console.error('Error generating QR DataURL:', err);
+                }
                 console.log(`QR Code for session ${sessionId} generated.`);
             }
 
@@ -93,6 +101,10 @@ export class SessionManager {
 
     getQR(sessionId: string) {
         return this.qrCodes.get(sessionId);
+    }
+
+    getQRImage(sessionId: string) {
+        return this.qrImages.get(sessionId);
     }
 
     listSessions() {

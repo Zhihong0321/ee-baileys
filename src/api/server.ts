@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { manager } from '../whatsapp/SocketManager';
+import QRCode from 'qrcode';
 
 const app = express();
 app.use(express.json());
@@ -35,10 +36,20 @@ app.post('/sessions/:id', async (req, res) => {
         const qr = instance.getQRCode();
         const isConnected = !!instance.sock?.user;
 
+        let qrImage = null;
+        if (qr) {
+            try {
+                qrImage = await QRCode.toDataURL(qr);
+            } catch (err) {
+                console.error('Error generating QR DataURL:', err);
+            }
+        }
+
         res.json({
             sessionId: req.params.id,
             status: isConnected ? 'connected' : 'initializing',
             qr: qr || null,
+            qrImage: qrImage,
             message: qr ? 'Scan code' : (isConnected ? 'Connected' : 'Waiting for connection update')
         });
     } catch (err: any) {
