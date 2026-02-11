@@ -11,8 +11,15 @@ export class WhatsAppManager {
         if (!instance) {
             instance = new WhatsAppInstance(sessionId);
             this.instances.set(sessionId, instance);
+            console.log(`[Manager] Creating new session: ${sessionId}`);
             // Stagger the initialization
-            await staggerer.schedule(() => instance!.init().then(() => { }));
+            staggerer.schedule(async () => {
+                try {
+                    await instance!.init();
+                } catch (err) {
+                    console.error(`[Manager] Failed to initialize session ${sessionId}:`, err);
+                }
+            });
         }
         return instance;
     }

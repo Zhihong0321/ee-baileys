@@ -50,7 +50,8 @@ app.post('/sessions/:id', async (req, res) => {
             status: isConnected ? 'connected' : 'initializing',
             qr: qr || null,
             qrImage: qrImage,
-            message: qr ? 'Scan code' : (isConnected ? 'Connected' : 'Waiting for connection update')
+            error: instance.lastError || null,
+            message: qr ? 'Scan code' : (isConnected ? 'Connected' : (instance.lastError ? 'Error occurred' : 'Waiting for connection update'))
         });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
