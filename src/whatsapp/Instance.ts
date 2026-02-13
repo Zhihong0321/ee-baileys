@@ -77,7 +77,7 @@ export class WhatsAppInstance {
             this.sock.ev.on('connection.update', async (update: Partial<ConnectionState>) => {
                 console.log(`[${this.sessionId}] Connection Update:`, JSON.stringify(update, null, 2));
                 const { connection, lastDisconnect, qr } = update;
-                this.qr = qr;
+                if (qr) this.qr = qr;
 
                 if (qr) {
                     try {

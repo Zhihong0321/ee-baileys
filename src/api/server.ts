@@ -65,10 +65,18 @@ app.get('/sessions', (req, res) => {
 
 // Get QR for a session
 app.get('/sessions/:id/qr', (req, res) => {
-    manager.getInstance(req.params.id).then(instance => {
+    manager.getInstance(req.params.id).then(async instance => {
         const qr = instance.getQRCode();
         if (!qr) return res.status(404).json({ error: 'QR not ready or already connected' });
-        res.json({ qr });
+
+        let qrImage = null;
+        try {
+            qrImage = await QRCode.toDataURL(qr);
+        } catch (err) {
+            console.error('Error generating QR DataURL:', err);
+        }
+
+        res.json({ qr, qrImage });
     }).catch((err: any) => {
         res.status(500).json({ error: err.message });
     });

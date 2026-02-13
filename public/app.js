@@ -30,19 +30,36 @@ async function checkServer() {
   }
 }
 
-function renderQr(qr) {
+function renderQr(qr, qrImage) {
   qrBox.innerHTML = '';
-  if (!qr) {
+  if (!qr && !qrImage) {
     qrBox.innerHTML = '<span class="muted">QR will appear here</span>';
     return;
   }
-  const canvas = document.createElement('canvas');
-  qrBox.appendChild(canvas);
-  window.QRCode.toCanvas(canvas, qr, { width: 180 }, err => {
-    if (err) {
-      qrBox.innerHTML = '<span class="muted">Failed to render QR</span>';
-    }
-  });
+
+  // Prefer server-generated image (most reliable)
+  if (qrImage) {
+    const img = document.createElement('img');
+    img.src = qrImage;
+    img.alt = 'Scan me';
+    img.style.maxWidth = '100%';
+    qrBox.appendChild(img);
+    return;
+  }
+
+  // Fallback to client-side generation
+  if (window.QRCode) {
+    const canvas = document.createElement('canvas');
+    qrBox.appendChild(canvas);
+    window.QRCode.toCanvas(canvas, qr, { width: 180 }, err => {
+      if (err) {
+        console.error(err);
+        qrBox.innerHTML = '<span class="muted">Failed to render QR</span>';
+      }
+    });
+  } else {
+    qrBox.innerHTML = '<span class="muted">Loading QR library...</span>';
+  }
 }
 
 async function initSession() {
@@ -59,7 +76,7 @@ async function initSession() {
     if (!res.ok) throw new Error(data.error || 'Failed to init session');
 
     sessionStatus.textContent = data.message || data.status;
-    renderQr(data.qr);
+    renderQr(data.qr, data.qrImage);
     msgSessionIdEl.value = sessionId;
     await refreshSessions();
   } catch (err) {
@@ -78,7 +95,7 @@ async function refreshQr() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'No QR yet');
     sessionStatus.textContent = 'Scan this QR code';
-    renderQr(data.qr);
+    renderQr(data.qr, data.qrImage);
   } catch (err) {
     sessionStatus.textContent = err.message;
     renderQr(null);
