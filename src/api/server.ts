@@ -20,6 +20,8 @@ app.get('/api', (req, res) => {
             'GET /sessions',
             'GET /sessions/:id/qr',
             'POST /messages/send',
+            'GET /chats?sessionId=...',
+            'GET /chats/:jid/messages?sessionId=...&limit=50&beforeTimestamp=...',
             'DELETE /sessions/:id'
         ]
     });
@@ -105,6 +107,55 @@ app.post('/messages/send', async (req, res) => {
     } catch (err: any) {
         res.status(500).json({ error: err.message });
     }
+});
+
+// List chats in a connected session (from in-memory cache/history sync)
+app.get('/chats', async (req, res) => {
+    const sessionId = String(req.query.sessionId || '').trim();
+    const rawLimit = Number(req.query.limit || 100);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 100;
+
+    if (!sessionId) {
+        return res.status(400).json({ error: 'Missing required query: sessionId' });
+    }
+
+    const instance = manager.getExistingInstance(sessionId);
+    if (!instance) {
+        return res.status(404).json({ error: 'Session not found' });
+    }
+
+    return res.json({
+        sessionId,
+        count: instance.getChats(limit).length,
+        chats: instance.getChats(limit),
+    });
+});
+
+// List messages for a chat in a connected session (from in-memory cache/history sync)
+app.get('/chats/:jid/messages', async (req, res) => {
+    const sessionId = String(req.query.sessionId || '').trim();
+    const jid = String(req.params.jid || '').trim();
+    const rawLimit = Number(req.query.limit || 50);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 50;
+    const beforeTimestampRaw = req.query.beforeTimestamp;
+    const beforeTimestamp = beforeTimestampRaw !== undefined ? Number(beforeTimestampRaw) : undefined;
+
+    if (!sessionId || !jid) {
+        return res.status(400).json({ error: 'Missing required fields: sessionId and chat jid' });
+    }
+
+    const instance = manager.getExistingInstance(sessionId);
+    if (!instance) {
+        return res.status(404).json({ error: 'Session not found' });
+    }
+
+    const messages = instance.getChatMessages(jid, limit, beforeTimestamp);
+    return res.json({
+        sessionId,
+        jid,
+        count: messages.length,
+        messages,
+    });
 });
 
 // Logout/Delete

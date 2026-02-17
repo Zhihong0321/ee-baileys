@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Baileys API Documentation</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Baileys Multi-API</p>
+        <h1>API & Webhook Documentation</h1>
+        <p class="subtitle">Base URL: <span class="endpoint">https://YOUR-DOMAIN</span></p>
+        <p class="subtitle"><a class="doc-link" href="/">Back to Dashboard</a></p>
+      </div>
+      <div class="status-pill">Version 1.0</div>
+    </header>
+
+    <section class="docs-grid">
+      <aside class="docs-nav">
+        <h3>Contents</h3>
+        <a href="#auth">Authentication</a>
+        <a href="#overview">Overview</a>
+        <a href="#sessions-init">POST /sessions/:id</a>
+        <a href="#sessions-list">GET /sessions</a>
+        <a href="#sessions-qr">GET /sessions/:id/qr</a>
+        <a href="#messages-send">POST /messages/send</a>
+        <a href="#chats-list">GET /chats</a>
+        <a href="#chats-messages">GET /chats/:jid/messages</a>
+        <a href="#sessions-delete">DELETE /sessions/:id</a>
+        <a href="#health">GET /health</a>
+        <a href="#postgres">Postgres Message Schema</a>
+        <a href="#errors">Error Model</a>
+      </aside>
+
+      <div class="card doc-section">
+        <section id="auth">
+          <h2>Authentication</h2>
+          <p class="muted">
+            Current server endpoints are open by default. If you add static API key middleware later,
+            use a header like <code>x-api-key: YOUR_API_KEY</code> for all requests.
+          </p>
+        </section>
+
+        <section id="overview">
+          <h2>Overview</h2>
+          <p><span class="pill">Content-Type: application/json</span> <span class="pill">UTF-8</span></p>
+          <p class="muted">Available REST endpoints in this server build:</p>
+          <ul>
+            <li><code>POST /sessions/:id</code></li>
+            <li><code>GET /sessions</code></li>
+            <li><code>GET /sessions/:id/qr</code></li>
+            <li><code>POST /messages/send</code></li>
+            <li><code>GET /chats?sessionId=...&amp;limit=100</code></li>
+            <li><code>GET /chats/:jid/messages?sessionId=...&amp;limit=50&amp;beforeTimestamp=...</code></li>
+            <li><code>DELETE /sessions/:id</code></li>
+            <li><code>GET /api</code></li>
+            <li><code>GET /health</code></li>
+          </ul>
+        </section>
+
+        <section id="sessions-init">
+          <h2><span class="method post">POST</span><span class="endpoint">/sessions/:id</span></h2>
+          <p class="muted">Create or initialize a WhatsApp session. Returns connection status and QR when available.</p>
+          <h3>Path Params</h3>
+          <table class="doc-table">
+            <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><code>id</code></td><td>string</td><td>yes</td><td>Session identifier, example: <code>101:sales-1</code></td></tr>
+            </tbody>
+          </table>
+          <h3>Response 200</h3>
+          <pre class="code-block"><code>{
+  "sessionId": "101:sales-1",
+  "status": "initializing",
+  "qr": "2@ABCDEF...",
+  "qrImage": "data:image/png;base64,...",
+  "error": null,
+  "message": "Scan code"
+}</code></pre>
+          <h3>cURL Example</h3>
+          <pre class="code-block"><code>curl -X POST "https://YOUR-DOMAIN/sessions/101:sales-1"</code></pre>
+        </section>
+
+        <section id="sessions-list">
+          <h2><span class="method get">GET</span><span class="endpoint">/sessions</span></h2>
+          <p class="muted">List active in-memory session IDs in this server process.</p>
+          <h3>Response 200</h3>
+          <pre class="code-block"><code>{
+  "sessions": ["101:sales-1", "101:support-1"]
+}</code></pre>
+          <h3>cURL Example</h3>
+          <pre class="code-block"><code>curl "https://YOUR-DOMAIN/sessions"</code></pre>
+        </section>
+
+        <section id="sessions-qr">
+          <h2><span class="method get">GET</span><span class="endpoint">/sessions/:id/qr</span></h2>
+          <p class="muted">Get current QR payload/image for scanning.</p>
+          <h3>Response 200</h3>
+          <pre class="code-block"><code>{
+  "qr": "2@ABCDEF...",
+  "qrImage": "data:image/png;base64,..."
+}</code></pre>
+          <h3>Response 404</h3>
+          <pre class="code-block"><code>{
+  "error": "QR not ready or already connected"
+}</code></pre>
+        </section>
+
+        <section id="messages-send">
+          <h2><span class="method post">POST</span><span class="endpoint">/messages/send</span></h2>
+          <p class="muted">Send a WhatsApp message from a connected session.</p>
+          <h3>Request Body</h3>
+          <table class="doc-table">
+            <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><code>sessionId</code></td><td>string</td><td>yes</td><td>Connected session ID</td></tr>
+              <tr><td><code>to</code></td><td>string</td><td>yes</td><td>Phone number or full JID. If number only, server appends <code>@s.whatsapp.net</code></td></tr>
+              <tr><td><code>text</code></td><td>string</td><td>yes</td><td>Message text</td></tr>
+              <tr><td><code>replyTo</code></td><td>string</td><td>no</td><td>Message ID to quote/reply</td></tr>
+            </tbody>
+          </table>
+          <h3>Request Example</h3>
+          <pre class="code-block"><code>{
+  "sessionId": "101:sales-1",
+  "to": "14155552671",
+  "text": "Hello from Baileys API"
+}</code></pre>
+          <h3>Response 200</h3>
+          <pre class="code-block"><code>{
+  "status": "sent",
+  "result": {
+    "key": {
+      "id": "3EB0....",
+      "remoteJid": "14155552671@s.whatsapp.net",
+      "fromMe": true
+    }
+  }
+}</code></pre>
+          <h3>cURL Example</h3>
+          <pre class="code-block"><code>curl -X POST "https://YOUR-DOMAIN/messages/send" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sessionId":"101:sales-1",
+    "to":"14155552671",
+    "text":"Hi there"
+  }'</code></pre>
+        </section>
+
+        <section id="chats-list">
+          <h2><span class="method get">GET</span><span class="endpoint">/chats</span></h2>
+          <p class="muted">List conversation threads from session cache/history sync.</p>
+          <h3>Query Params</h3>
+          <table class="doc-table">
+            <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><code>sessionId</code></td><td>string</td><td>yes</td><td>Connected session ID</td></tr>
+              <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max chats returned (default 100, max 500)</td></tr>
+            </tbody>
+          </table>
+          <h3>Response 200</h3>
+          <pre class="code-block"><code>{
+  "sessionId": "101:sales-1",
+  "count": 2,
+  "chats": [
+    {
+      "id": "14155552671@s.whatsapp.net",
+      "name": "Alice",
+      "unreadCount": 0,
+      "archived": false,
+      "muteEndTime": null,
+      "isGroup": false,
+      "lastMessageTimestamp": 1708186800000
+    }
+  ]
+}</code></pre>
+          <h3>cURL Example</h3>
+          <pre class="code-block"><code>curl "https://YOUR-DOMAIN/chats?sessionId=101:sales-1&limit=100"</code></pre>
+        </section>
+
+        <section id="chats-messages">
+          <h2><span class="method get">GET</span><span class="endpoint">/chats/:jid/messages</span></h2>
+          <p class="muted">Read messages for one chat JID from session cache/history sync.</p>
+          <h3>Path Params</h3>
+          <table class="doc-table">
+            <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><code>jid</code></td><td>string</td><td>yes</td><td>Chat JID, URL-encoded when needed</td></tr>
+            </tbody>
+          </table>
+          <h3>Query Params</h3>
+          <table class="doc-table">
+            <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><code>sessionId</code></td><td>string</td><td>yes</td><td>Connected session ID</td></tr>
+              <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max messages returned (default 50, max 500)</td></tr>
+              <tr><td><code>beforeTimestamp</code></td><td>number (ms)</td><td>no</td><td>Return messages older than this timestamp</td></tr>
+            </tbody>
+          </table>
+          <h3>Response 200</h3>
+          <pre class="code-block"><code>{
+  "sessionId": "101:sales-1",
+  "jid": "14155552671@s.whatsapp.net",
+  "count": 1,
+  "messages": [
+    {
+      "id": "3EB0...",
+      "remoteJid": "14155552671@s.whatsapp.net",
+      "participant": null,
+      "fromMe": false,
+      "timestamp": 1708186800000,
+      "type": "conversation",
+      "content": "Hello",
+      "raw": { }
+    }
+  ]
+}</code></pre>
+          <h3>cURL Example</h3>
+          <pre class="code-block"><code>curl "https://YOUR-DOMAIN/chats/14155552671%40s.whatsapp.net/messages?sessionId=101:sales-1&limit=50"</code></pre>
+        </section>
+
+        <section id="sessions-delete">
+          <h2><span class="method delete">DELETE</span><span class="endpoint">/sessions/:id</span></h2>
+          <p class="muted">Logout and delete a session from memory.</p>
+          <h3>Response 200</h3>
+          <pre class="code-block"><code>{
+  "status": "deleted"
+}</code></pre>
+        </section>
+
+        <section id="health">
+          <h2><span class="method get">GET</span><span class="endpoint">/health</span></h2>
+          <p class="muted">Health check endpoint for uptime monitors and load balancers.</p>
+          <h3>Response 200</h3>
+          <pre class="code-block"><code>{
+  "status": "ok"
+}</code></pre>
+        </section>
+
+        <section id="postgres">
+          <h2>Postgres Message Schema (Inbound Write)</h2>
+          <p class="muted">
+            On incoming messages, server writes to <code>et_messages</code> (from your <code>MESSAGE_SCHEMA.md</code> contract)
+            when <code>DATABASE_URL</code> is set.
+          </p>
+          <p class="muted">
+            Note: chat/message read endpoints are backed by in-memory cache and WhatsApp history sync events.
+            For long-term complete history, query your Postgres tables.
+          </p>
+          <h3>Insert Mapping</h3>
+          <table class="doc-table">
+            <thead><tr><th>DB Column</th><th>Value Source</th></tr></thead>
+            <tbody>
+              <tr><td><code>tenant_id</code></td><td><code>DEFAULT_TENANT_ID</code> env, else numeric prefix in <code>sessionId</code> (e.g. <code>101:sales-1</code>)</td></tr>
+              <tr><td><code>lead_id</code></td><td>Sender JID numeric part (fallback deterministic int hash)</td></tr>
+              <tr><td><code>channel</code></td><td><code>"whatsapp"</code></td></tr>
+              <tr><td><code>message_id</code></td><td>Baileys <code>msg.key.id</code></td></tr>
+              <tr><td><code>timestamp</code></td><td>Baileys <code>messageTimestamp</code> converted to milliseconds</td></tr>
+              <tr><td><code>direction</code></td><td><code>"inbound"</code></td></tr>
+              <tr><td><code>message_type</code></td><td>Derived: text/image/video/audio/document/sticker/reaction/unknown</td></tr>
+              <tr><td><code>text_content</code></td><td>conversation/ext text/caption where available</td></tr>
+              <tr><td><code>media_url</code></td><td><code>null</code> (current)</td></tr>
+              <tr><td><code>raw_json</code></td><td>Full Baileys message JSON</td></tr>
+            </tbody>
+          </table>
+          <h3>Idempotency</h3>
+          <p class="muted">Uses DB conflict handling on unique key <code>(channel, lead_id, message_id)</code>.</p>
+        </section>
+
+        <section id="errors">
+          <h2>Error Model</h2>
+          <p class="muted">Most errors use JSON with <code>error</code> string.</p>
+          <pre class="code-block"><code>{
+  "error": "Missing required fields"
+}</code></pre>
+          <h3>Common Cases</h3>
+          <table class="doc-table">
+            <thead><tr><th>Status</th><th>Case</th><th>Example</th></tr></thead>
+            <tbody>
+              <tr><td>400</td><td>Invalid request body</td><td><code>{"error":"Missing required fields"}</code></td></tr>
+              <tr><td>404</td><td>QR unavailable</td><td><code>{"error":"QR not ready or already connected"}</code></td></tr>
+              <tr><td>500</td><td>Internal/server error</td><td><code>{"error":"Socket not initialized"}</code></td></tr>
+            </tbody>
+          </table>
+        </section>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

@@ -41,6 +41,10 @@ export class WhatsAppManager {
         return Array.from(this.instances.keys());
     }
 
+    getExistingInstance(sessionId: string) {
+        return this.instances.get(sessionId);
+    }
+
     async removeInstance(sessionId: string) {
         const instance = this.instances.get(sessionId);
         if (instance) {
