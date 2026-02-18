@@ -77,7 +77,9 @@ class PostgresMessageWriter {
      * Resolve lead_id from et_leads by matching normalized phone digits within the tenant.
      */
     private async resolveLead(pool: PgPool, tenantId: number, remoteJid: string): Promise<number | null> {
-        const digits = remoteJid.split('@')[0].replace(/\D/g, '');
+        // Strip device suffix (e.g. "60182970127:0@s.whatsapp.net" → "60182970127")
+        const userPart = remoteJid.split('@')[0].split(':')[0];
+        const digits = userPart.replace(/\D/g, '');
         if (!digits) return null;
 
         const sql = `
