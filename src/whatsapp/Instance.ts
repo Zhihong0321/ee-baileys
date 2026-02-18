@@ -65,9 +65,7 @@ export class WhatsAppInstance {
                     creds: state.creds,
                     keys: makeCacheableSignalKeyStore(state.keys, logger),
                 },
-                // PRO FINDING: Auto-recreate session on Bad MAC/Corruption
                 enableAutoSessionRecreation: true,
-                // Add a small delay for retries
                 retryRequestDelayMs: 5000,
                 connectTimeoutMs: 60000,
                 defaultQueryTimeoutMs: 60000,
@@ -150,7 +148,6 @@ export class WhatsAppInstance {
                 }
             });
 
-            // PRO FINDING: Handle LID Mapping
             this.sock.ev.on('messages.upsert', async ({ messages, type }) => {
                 this.cacheMessages(messages);
                 if (type !== 'notify') return;
@@ -173,25 +170,19 @@ export class WhatsAppInstance {
                     // Deduplication
                     if (deduper.shouldIgnore(msg.key.id!)) continue;
 
-                    // Resolve LID to phone number JID for lead matching
-                    let resolvedSenderJid: string | undefined;
-                    if (remoteJid?.endsWith('@lid') && this.sock?.signalRepository?.lidMapping) {
-                        try {
-                            const pnJid = await this.sock.signalRepository.lidMapping.getPNForLID(remoteJid);
-                            if (pnJid) {
-                                resolvedSenderJid = pnJid;
-                                console.log(`[${this.sessionId}] LID resolved: ${remoteJid} → ${pnJid}`);
-                            } else {
-                                console.warn(`[${this.sessionId}] LID mapping not found for ${remoteJid}`);
-                            }
-                        } catch (err: any) {
-                            console.warn(`[${this.sessionId}] LID resolution failed: ${err.message}`);
-                        }
-                    }
+                    // Resolve sender phone number JID.
+                    // WhatsApp sends BOTH a phone-number JID (@s.whatsapp.net) and a LID (@lid)
+                    // on every message. The primary (remoteJid) can be either format.
+                    // remoteJidAlt always holds the OTHER format.
+                    // We always want the phone-number JID for lead matching.
+                    const key = msg.key as any;
+                    const senderJid = remoteJid?.endsWith('@lid')
+                        ? (key.remoteJidAlt || remoteJid)   // primary is LID → use alt (PN)
+                        : remoteJid!;                        // primary is already PN → use directly
 
-                    console.log(`[${this.sessionId}] New message from ${msg.pushName || remoteJid}`);
+                    console.log(`[${this.sessionId}] New message from ${msg.pushName || senderJid} (jid=${senderJid})`);
 
-                    await postgresMessageWriter.storeInboundMessage(this.sessionId, msg, resolvedSenderJid);
+                    await postgresMessageWriter.storeInboundMessage(this.sessionId, msg, senderJid);
 
                     dispatchWebhook({
                         sessionId: this.sessionId,
@@ -199,12 +190,6 @@ export class WhatsAppInstance {
                         data: formatMessage(msg)
                     });
                 }
-            });
-
-            // PRO FINDING: Listen for LID Mappings explicitly if needed
-            // (Note: Baileys v7 handles the internal store, but we expose an event if we want database sync)
-            this.sock.ev.on('labels.association', (data) => {
-                console.log(`[${this.sessionId}] Label/Identity change detected`, data);
             });
 
             return this.sock;

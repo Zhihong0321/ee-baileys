@@ -74,25 +74,15 @@ class PostgresMessageWriter {
     }
 
     /**
-     * Resolve lead_id from et_leads.
-     * 1. If sender is @lid, try direct whatsapp_lid match (fast, for pre-verified leads)
-     * 2. Fallback: match by normalized phone digits in external_id
+     * Resolve lead_id from et_leads by matching phone digits.
+     *
+     * senderJid is always a phone-number JID (@s.whatsapp.net).
+     * We strip the domain and any device suffix (e.g. "60182970127:0@s.whatsapp.net" → "60182970127")
+     * then match against the digits of et_leads.external_id.
      */
-    private async resolveLead(pool: PgPool, tenantId: number, remoteJid: string): Promise<number | null> {
-        // Try LID match first if sender is @lid
-        if (remoteJid.endsWith('@lid')) {
-            const lidResult = await pool.query(
-                `SELECT id FROM et_leads WHERE tenant_id = $1 AND whatsapp_lid = $2 ORDER BY id ASC LIMIT 1`,
-                [tenantId, remoteJid]
-            );
-            if (lidResult.rows.length > 0) {
-                return lidResult.rows[0].id;
-            }
-        }
-
-        // Fallback: match by phone digits
-        // Strip device suffix (e.g. "60182970127:0@s.whatsapp.net" → "60182970127")
-        const userPart = remoteJid.split('@')[0].split(':')[0];
+    private async resolveLead(pool: PgPool, tenantId: number, senderJid: string): Promise<number | null> {
+        // Strip domain and device suffix: "60182970127:0@s.whatsapp.net" → "60182970127"
+        const userPart = senderJid.split('@')[0].split(':')[0];
         const digits = userPart.replace(/\D/g, '');
         if (!digits) return null;
 
@@ -109,47 +99,48 @@ class PostgresMessageWriter {
         return result.rows.length > 0 ? result.rows[0].id : null;
     }
 
-    async storeInboundMessage(sessionId: string, msg: proto.IWebMessageInfo, resolvedSenderJid?: string): Promise<void> {
+    /**
+     * Store an inbound WhatsApp message into et_messages.
+     *
+     * @param sessionId   - The Baileys session identifier (maps to et_channel_sessions)
+     * @param msg         - Raw Baileys message object
+     * @param senderJid   - Always a phone-number JID (@s.whatsapp.net), resolved by Instance.ts
+     */
+    async storeInboundMessage(sessionId: string, msg: proto.IWebMessageInfo, senderJid: string): Promise<void> {
         const pool = this.getPool();
         if (!pool) return;
 
         const messageId = msg.key?.id;
-        const remoteJid = msg.key?.remoteJid;
-        if (!messageId || !remoteJid) return;
+        if (!messageId || !senderJid) return;
 
         // 1. Resolve session → tenant_id + channel_session_id
         const session = await this.resolveSession(pool, sessionId);
         if (!session) {
             console.error('[Postgres] Session not found in et_channel_sessions', {
                 sessionId,
-                messageKey: msg.key?.id,
-                remoteJid,
+                messageId,
+                senderJid,
             });
             return;
         }
 
-        // 2. Resolve lead within tenant
-        // Use resolvedSenderJid (LID→PN resolved) if provided, otherwise fall back to raw JID
-        const senderJid = resolvedSenderJid || msg.key?.participant || remoteJid;
+        // 2. Resolve lead within tenant by phone digits
         const leadId = await this.resolveLead(pool, session.tenantId, senderJid);
         if (leadId === null) {
             console.warn('[Postgres] Lead not found in et_leads', {
                 tenant_id: session.tenantId,
                 sessionId,
-                remoteJid: senderJid,
-                messageKey: msg.key?.id,
+                senderJid,
+                messageId,
             });
             return;
         }
-
-        // 3. Build external_message_id
-        const externalMessageId = messageId;
 
         const messageType = this.resolveMessageType(msg);
         const textContent = this.resolveTextContent(msg);
         const mediaUrl = null;
 
-        // 4. Upsert into et_messages
+        // 3. Upsert into et_messages (thread_id assigned automatically by DB trigger)
         const sql = `
             INSERT INTO et_messages (
                 tenant_id, lead_id, thread_id, channel_session_id,
@@ -169,20 +160,20 @@ class PostgresMessageWriter {
         `;
 
         try {
-            const result = await pool.query(sql, [
+            await pool.query(sql, [
                 session.tenantId,
                 leadId,
                 session.channelSessionId,
-                externalMessageId,
+                messageId,
                 messageType,
                 textContent,
                 mediaUrl,
                 JSON.stringify(msg),
             ]);
 
-            console.log(`[Postgres] Stored inbound message ${externalMessageId} (tenant=${session.tenantId}, lead=${leadId}, session=${session.channelSessionId})`);
+            console.log(`[Postgres] Stored inbound message ${messageId} (tenant=${session.tenantId}, lead=${leadId}, session=${session.channelSessionId})`);
         } catch (err: any) {
-            console.error(`[Postgres] Failed to store inbound message ${externalMessageId}: ${err.message}`);
+            console.error(`[Postgres] Failed to store inbound message ${messageId}: ${err.message}`);
         }
     }
 

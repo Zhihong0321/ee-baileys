@@ -20,7 +20,6 @@ app.get('/api', (req, res) => {
             'GET /sessions',
             'GET /sessions/:id/qr',
             'POST /messages/send',
-            'POST /leads/verify-whatsapp',
             'GET /chats?sessionId=...',
             'GET /chats/:jid/messages?sessionId=...&limit=50&beforeTimestamp=...',
             'DELETE /sessions/:id'
@@ -30,95 +29,6 @@ app.get('/api', (req, res) => {
 
 app.get('/health', (req, res) => {
     res.json({ status: 'ok' });
-});
-
-// Verify WhatsApp number and pre-resolve LID for a lead
-app.post('/leads/verify-whatsapp', async (req, res) => {
-    const { sessionId, phone } = req.body;
-    if (!sessionId || !phone) {
-        return res.status(400).json({ error: 'Missing required fields: sessionId, phone' });
-    }
-
-    const digits = String(phone).replace(/\D/g, '');
-    if (!digits) {
-        return res.status(400).json({ error: 'Invalid phone number' });
-    }
-
-    try {
-        // 1. Get or restore session (auto-init if not in memory)
-        const instance = await manager.getInstance(sessionId);
-        if (!instance.sock) {
-            return res.status(400).json({ error: 'Socket not initialized — session is still starting up' });
-        }
-        if (!instance.sock.user) {
-            return res.status(400).json({ error: 'Session not connected — may need QR scan or is reconnecting' });
-        }
-
-        // 2. Check if phone is a WhatsApp user
-        let isWhatsApp = false;
-        let verifyError: string | null = null;
-        try {
-            const results = await instance.sock.onWhatsApp(digits + '@s.whatsapp.net');
-            isWhatsApp = !!results?.[0]?.exists;
-        } catch (err: any) {
-            verifyError = err.message;
-            console.error(`[verify-whatsapp] onWhatsApp failed for ${digits}: ${err.message}`);
-        }
-
-        // 3. Resolve LID (only if WhatsApp user)
-        // getLIDForPN does cache lookup first, then falls back to USync LID protocol query
-        let lid: string | null = null;
-        if (isWhatsApp && instance.sock.signalRepository?.lidMapping?.getLIDForPN) {
-            try {
-                const pnJid = digits + '@s.whatsapp.net';
-                lid = await instance.sock.signalRepository.lidMapping.getLIDForPN(pnJid);
-                console.log(`[verify-whatsapp] getLIDForPN(${pnJid}) → ${lid}`);
-            } catch (err: any) {
-                console.warn(`[verify-whatsapp] LID resolution failed for ${digits}: ${err.message}`);
-            }
-        } else if (isWhatsApp) {
-            console.warn(`[verify-whatsapp] lidMapping.getLIDForPN not available on signalRepository`);
-        }
-
-        // 4. Always update lead in DB when we have a verification result
-        let leadUpdated = false;
-        const databaseUrl = process.env.DATABASE_URL;
-        if (databaseUrl) {
-            try {
-                const { Pool } = require('pg');
-                const pool = new Pool({ connectionString: databaseUrl });
-
-                // Resolve tenant_id from session
-                const sessionResult = await pool.query(
-                    `SELECT tenant_id FROM et_channel_sessions WHERE channel_type = 'WHATSAPP' AND session_identifier = $1 LIMIT 1`,
-                    [sessionId]
-                );
-
-                if (sessionResult.rows.length > 0) {
-                    const tenantId = sessionResult.rows[0].tenant_id;
-                    const updateResult = await pool.query(
-                        `UPDATE et_leads
-                         SET whatsapp_lid = COALESCE($1, whatsapp_lid),
-                             is_whatsapp_valid = $2,
-                             last_verify_at = NOW(),
-                             verify_error = $3
-                         WHERE tenant_id = $4
-                           AND regexp_replace(external_id, '\\D', '', 'g') = $5`,
-                        [lid, isWhatsApp, verifyError, tenantId, digits]
-                    );
-                    leadUpdated = (updateResult.rowCount ?? 0) > 0;
-                }
-
-                await pool.end();
-            } catch (err: any) {
-                console.error(`[verify-whatsapp] DB update failed: ${err.message}`);
-            }
-        }
-
-        res.json({ phone: digits, isWhatsApp, lid, leadUpdated, verifyError });
-    } catch (err: any) {
-        res.status(500).json({ error: err.message });
-    }
 });
 
 // Init or Get status
