@@ -31,6 +31,32 @@ app.get('/health', (req, res) => {
     res.json({ status: 'ok' });
 });
 
+// Debug: resolve LID to phone number
+app.get('/debug/resolve-lid/:lid', async (req, res) => {
+    const lid = req.params.lid;
+    const sessionId = String(req.query.sessionId || '').trim();
+    if (!sessionId) return res.status(400).json({ error: 'Missing sessionId query param' });
+
+    const instance = manager.getExistingInstance(sessionId);
+    if (!instance) return res.status(404).json({ error: 'Session not found' });
+    if (!instance.sock) return res.status(400).json({ error: 'Socket not initialized' });
+
+    const hasLidMapping = !!instance.sock.signalRepository?.lidMapping;
+    const hasPNForLID = typeof instance.sock.signalRepository?.lidMapping?.getPNForLID === 'function';
+
+    let resolved = null;
+    let error = null;
+    if (hasPNForLID) {
+        try {
+            resolved = await instance.sock.signalRepository.lidMapping.getPNForLID(lid);
+        } catch (err: any) {
+            error = err.message;
+        }
+    }
+
+    res.json({ lid, sessionId, hasLidMapping, hasPNForLID, resolved, error });
+});
+
 // Init or Get status
 app.post('/sessions/:id', async (req, res) => {
     try {
