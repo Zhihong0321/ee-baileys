@@ -66,19 +66,18 @@ app.post('/leads/verify-whatsapp', async (req, res) => {
         }
 
         // 3. Resolve LID (only if WhatsApp user)
+        // getLIDForPN does cache lookup first, then falls back to USync LID protocol query
         let lid: string | null = null;
-        if (isWhatsApp && instance.sock.signalRepository?.lidMapping?.getLIDsForPNs) {
+        if (isWhatsApp && instance.sock.signalRepository?.lidMapping?.getLIDForPN) {
             try {
-                const lidMap = await instance.sock.signalRepository.lidMapping.getLIDsForPNs([digits + '@s.whatsapp.net']);
-                if (lidMap && typeof lidMap === 'object') {
-                    const firstLid = Object.values(lidMap)[0];
-                    if (firstLid && typeof firstLid === 'string') {
-                        lid = firstLid;
-                    }
-                }
+                const pnJid = digits + '@s.whatsapp.net';
+                lid = await instance.sock.signalRepository.lidMapping.getLIDForPN(pnJid);
+                console.log(`[verify-whatsapp] getLIDForPN(${pnJid}) → ${lid}`);
             } catch (err: any) {
                 console.warn(`[verify-whatsapp] LID resolution failed for ${digits}: ${err.message}`);
             }
+        } else if (isWhatsApp) {
+            console.warn(`[verify-whatsapp] lidMapping.getLIDForPN not available on signalRepository`);
         }
 
         // 4. Always update lead in DB when we have a verification result
