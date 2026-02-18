@@ -1,12 +1,17 @@
 import { proto } from '@whiskeysockets/baileys';
 
 type PgPool = {
-    query: (text: string, params?: unknown[]) => Promise<{ rowCount: number }>;
+    query: (text: string, params?: unknown[]) => Promise<{ rows: any[]; rowCount: number }>;
 };
+
+interface SessionInfo {
+    channelSessionId: number;
+    tenantId: number;
+}
 
 class PostgresMessageWriter {
     private pool?: PgPool;
-    private warnedMissingTenant = false;
+    private sessionCache = new Map<string, SessionInfo | null>();
     private warnedMissingPg = false;
     private warnedMissingDbUrl = false;
 
@@ -23,7 +28,6 @@ class PostgresMessageWriter {
         if (this.pool) return this.pool;
 
         try {
-            // Use require so the app still boots even when pg is not installed yet.
             // eslint-disable-next-line @typescript-eslint/no-var-requires
             const { Pool } = require('pg');
             this.pool = new Pool({ connectionString: databaseUrl }) as PgPool;
@@ -37,6 +41,58 @@ class PostgresMessageWriter {
         }
     }
 
+    /**
+     * Resolve tenant_id and channel_session_id from et_channel_sessions.
+     * Results are cached per sessionId since session mappings don't change at runtime.
+     */
+    private async resolveSession(pool: PgPool, sessionId: string): Promise<SessionInfo | null> {
+        if (this.sessionCache.has(sessionId)) {
+            return this.sessionCache.get(sessionId)!;
+        }
+
+        const sql = `
+            SELECT id, tenant_id
+            FROM et_channel_sessions
+            WHERE channel_type = 'whatsapp'
+              AND session_identifier = $1
+            LIMIT 1
+        `;
+
+        const result = await pool.query(sql, [sessionId]);
+
+        if (result.rows.length === 0) {
+            this.sessionCache.set(sessionId, null);
+            return null;
+        }
+
+        const info: SessionInfo = {
+            channelSessionId: result.rows[0].id,
+            tenantId: result.rows[0].tenant_id,
+        };
+        this.sessionCache.set(sessionId, info);
+        return info;
+    }
+
+    /**
+     * Resolve lead_id from et_leads by matching normalized phone digits within the tenant.
+     */
+    private async resolveLead(pool: PgPool, tenantId: number, remoteJid: string): Promise<number | null> {
+        const digits = remoteJid.split('@')[0].replace(/\D/g, '');
+        if (!digits) return null;
+
+        const sql = `
+            SELECT id
+            FROM et_leads
+            WHERE tenant_id = $1
+              AND regexp_replace(external_id, '\\D', '', 'g') = $2
+            ORDER BY id ASC
+            LIMIT 1
+        `;
+
+        const result = await pool.query(sql, [tenantId, digits]);
+        return result.rows.length > 0 ? result.rows[0].id : null;
+    }
+
     async storeInboundMessage(sessionId: string, msg: proto.IWebMessageInfo): Promise<void> {
         const pool = this.getPool();
         if (!pool) return;
@@ -45,110 +101,72 @@ class PostgresMessageWriter {
         const remoteJid = msg.key?.remoteJid;
         if (!messageId || !remoteJid) return;
 
-        const tenantId = this.resolveTenantId(sessionId);
-        if (tenantId === null) {
-            if (!this.warnedMissingTenant) {
-                this.warnedMissingTenant = true;
-                console.warn('[Postgres] Tenant ID not resolved. Set DEFAULT_TENANT_ID or use numeric sessionId prefix like "101:my-session".');
-            }
+        // 1. Resolve session → tenant_id + channel_session_id
+        const session = await this.resolveSession(pool, sessionId);
+        if (!session) {
+            console.error('[Postgres] Session not found in et_channel_sessions', {
+                sessionId,
+                messageKey: msg.key?.id,
+                remoteJid,
+            });
             return;
         }
 
+        // 2. Resolve lead within tenant
         const senderJid = msg.key?.participant || remoteJid;
-        const leadId = this.resolveLeadId(senderJid);
-        const timestamp = this.resolveTimestampMs(msg.messageTimestamp);
+        const leadId = await this.resolveLead(pool, session.tenantId, senderJid);
+        if (leadId === null) {
+            console.warn('[Postgres] Lead not found in et_leads', {
+                tenant_id: session.tenantId,
+                sessionId,
+                remoteJid: senderJid,
+                messageKey: msg.key?.id,
+            });
+            return;
+        }
+
+        // 3. Build external_message_id
+        const externalMessageId = messageId;
+
         const messageType = this.resolveMessageType(msg);
         const textContent = this.resolveTextContent(msg);
         const mediaUrl = null;
 
+        // 4. Upsert into et_messages
         const sql = `
             INSERT INTO et_messages (
-                tenant_id,
-                lead_id,
-                channel,
-                message_id,
-                timestamp,
-                direction,
-                message_type,
-                text_content,
-                media_url,
-                raw_json
-            ) VALUES ($1, $2, 'whatsapp', $3, $4, 'inbound', $5, $6, $7, $8::jsonb)
-            ON CONFLICT (channel, lead_id, message_id) DO NOTHING
+                tenant_id, lead_id, thread_id, channel_session_id,
+                channel, external_message_id, direction, message_type,
+                text_content, media_url, raw_payload, delivery_status,
+                created_at, updated_at
+            ) VALUES (
+                $1, $2, NULL, $3,
+                'whatsapp', $4, 'inbound', $5,
+                $6, $7, $8::jsonb, 'received',
+                NOW(), NOW()
+            )
+            ON CONFLICT (tenant_id, channel, external_message_id)
+            DO UPDATE SET
+                raw_payload = EXCLUDED.raw_payload,
+                updated_at = NOW()
         `;
 
         try {
             const result = await pool.query(sql, [
-                tenantId,
+                session.tenantId,
                 leadId,
-                messageId,
-                timestamp,
+                session.channelSessionId,
+                externalMessageId,
                 messageType,
                 textContent,
                 mediaUrl,
                 JSON.stringify(msg),
             ]);
 
-            if (result.rowCount === 0) {
-                return;
-            }
-
-            console.log(`[Postgres] Stored inbound message ${messageId} (tenant=${tenantId}, lead=${leadId})`);
+            console.log(`[Postgres] Stored inbound message ${externalMessageId} (tenant=${session.tenantId}, lead=${leadId}, session=${session.channelSessionId})`);
         } catch (err: any) {
-            console.error(`[Postgres] Failed to store inbound message ${messageId}: ${err.message}`);
+            console.error(`[Postgres] Failed to store inbound message ${externalMessageId}: ${err.message}`);
         }
-    }
-
-    private resolveTenantId(sessionId: string): number | null {
-        const envTenant = process.env.DEFAULT_TENANT_ID;
-        if (envTenant && /^\d+$/.test(envTenant)) {
-            return Number(envTenant);
-        }
-
-        const prefix = sessionId.split(':')[0];
-        if (/^\d+$/.test(prefix)) {
-            return Number(prefix);
-        }
-
-        return null;
-    }
-
-    private resolveLeadId(jid: string): number {
-        const digits = jid.split('@')[0].replace(/\D/g, '');
-        if (digits && Number(digits) <= 2147483647) {
-            return Number(digits);
-        }
-        return this.hashToInt32(jid);
-    }
-
-    private hashToInt32(input: string): number {
-        let hash = 0;
-        for (let i = 0; i < input.length; i++) {
-            hash = ((hash << 5) - hash + input.charCodeAt(i)) | 0;
-        }
-        const positive = Math.abs(hash);
-        return positive === 0 ? 1 : positive;
-    }
-
-    private resolveTimestampMs(value: unknown): number {
-        if (typeof value === 'number') {
-            return value > 1_000_000_000_000 ? value : value * 1000;
-        }
-
-        if (typeof value === 'string') {
-            const n = Number(value);
-            if (!Number.isNaN(n)) return n > 1_000_000_000_000 ? n : n * 1000;
-        }
-
-        if (value && typeof value === 'object') {
-            const maybeToNumber = (value as { toNumber?: () => number }).toNumber;
-            if (typeof maybeToNumber === 'function') {
-                const n = maybeToNumber();
-                return n > 1_000_000_000_000 ? n : n * 1000;
-            }
-        }
-
-        return Date.now();
     }
 
     private resolveMessageType(msg: proto.IWebMessageInfo): string {

@@ -156,13 +156,24 @@ export class WhatsAppInstance {
                 if (type !== 'notify') return;
 
                 for (const msg of messages) {
+                    const remoteJid = msg.key?.remoteJid;
+
+                    // Skip own messages
+                    if (msg.key.fromMe) continue;
+
+                    // Skip groups
+                    if (remoteJid?.endsWith('@g.us')) continue;
+
+                    // Skip status/broadcast
+                    if (remoteJid === 'status@broadcast') continue;
+
+                    // Skip empty message payloads
+                    if (!msg.message) continue;
+
                     // Deduplication
                     if (deduper.shouldIgnore(msg.key.id!)) continue;
 
-                    // Don't forward own messages
-                    if (msg.key.fromMe) continue;
-
-                    console.log(`[${this.sessionId}] New message from ${msg.pushName || msg.key.remoteJid}`);
+                    console.log(`[${this.sessionId}] New message from ${msg.pushName || remoteJid}`);
 
                     await postgresMessageWriter.storeInboundMessage(this.sessionId, msg);
 
