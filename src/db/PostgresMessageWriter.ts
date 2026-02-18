@@ -74,9 +74,23 @@ class PostgresMessageWriter {
     }
 
     /**
-     * Resolve lead_id from et_leads by matching normalized phone digits within the tenant.
+     * Resolve lead_id from et_leads.
+     * 1. If sender is @lid, try direct whatsapp_lid match (fast, for pre-verified leads)
+     * 2. Fallback: match by normalized phone digits in external_id
      */
     private async resolveLead(pool: PgPool, tenantId: number, remoteJid: string): Promise<number | null> {
+        // Try LID match first if sender is @lid
+        if (remoteJid.endsWith('@lid')) {
+            const lidResult = await pool.query(
+                `SELECT id FROM et_leads WHERE tenant_id = $1 AND whatsapp_lid = $2 ORDER BY id ASC LIMIT 1`,
+                [tenantId, remoteJid]
+            );
+            if (lidResult.rows.length > 0) {
+                return lidResult.rows[0].id;
+            }
+        }
+
+        // Fallback: match by phone digits
         // Strip device suffix (e.g. "60182970127:0@s.whatsapp.net" → "60182970127")
         const userPart = remoteJid.split('@')[0].split(':')[0];
         const digits = userPart.replace(/\D/g, '');

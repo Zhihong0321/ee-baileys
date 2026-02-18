@@ -27,6 +27,7 @@
         <a href="#sessions-list">GET /sessions</a>
         <a href="#sessions-qr">GET /sessions/:id/qr</a>
         <a href="#messages-send">POST /messages/send</a>
+        <a href="#leads-verify">POST /leads/verify-whatsapp</a>
         <a href="#chats-list">GET /chats</a>
         <a href="#chats-messages">GET /chats/:jid/messages</a>
         <a href="#sessions-delete">DELETE /sessions/:id</a>
@@ -53,6 +54,7 @@
             <li><code>GET /sessions</code></li>
             <li><code>GET /sessions/:id/qr</code></li>
             <li><code>POST /messages/send</code></li>
+            <li><code>POST /leads/verify-whatsapp</code></li>
             <li><code>GET /chats?sessionId=...&amp;limit=100</code></li>
             <li><code>GET /chats/:jid/messages?sessionId=...&amp;limit=50&amp;beforeTimestamp=...</code></li>
             <li><code>DELETE /sessions/:id</code></li>
@@ -149,6 +151,55 @@
   }'</code></pre>
         </section>
 
+        <section id="leads-verify">
+          <h2><span class="method post">POST</span><span class="endpoint">/leads/verify-whatsapp</span></h2>
+          <p class="muted">Check if a phone number is a WhatsApp user and pre-resolve their LID (Linked ID). Stores the LID on the matching lead in <code>et_leads.whatsapp_lid</code> for fast inbound message matching.</p>
+          <h3>Request Body</h3>
+          <table class="doc-table">
+            <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><code>sessionId</code></td><td>string</td><td>yes</td><td>Connected session ID (must be online)</td></tr>
+              <tr><td><code>phone</code></td><td>string</td><td>yes</td><td>Phone number (digits only, with country code, e.g. <code>60182970127</code>)</td></tr>
+            </tbody>
+          </table>
+          <h3>Request Example</h3>
+          <pre class="code-block"><code>{
+  "sessionId": "1:primary1",
+  "phone": "60182970127"
+}</code></pre>
+          <h3>Response 200</h3>
+          <pre class="code-block"><code>{
+  "phone": "60182970127",
+  "isWhatsApp": true,
+  "lid": "157535172559093@lid",
+  "leadUpdated": true
+}</code></pre>
+          <h3>Response 200 (not on WhatsApp)</h3>
+          <pre class="code-block"><code>{
+  "phone": "10000000000",
+  "isWhatsApp": false,
+  "lid": null,
+  "leadUpdated": false
+}</code></pre>
+          <h3>Response Fields</h3>
+          <table class="doc-table">
+            <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><code>phone</code></td><td>string</td><td>Normalized phone digits</td></tr>
+              <tr><td><code>isWhatsApp</code></td><td>boolean</td><td>Whether the number is registered on WhatsApp</td></tr>
+              <tr><td><code>lid</code></td><td>string | null</td><td>Resolved LID JID (e.g. <code>157535172559093@lid</code>), or null if unavailable</td></tr>
+              <tr><td><code>leadUpdated</code></td><td>boolean</td><td>Whether the LID was saved to <code>et_leads.whatsapp_lid</code></td></tr>
+            </tbody>
+          </table>
+          <h3>cURL Example</h3>
+          <pre class="code-block"><code>curl -X POST "https://YOUR-DOMAIN/leads/verify-whatsapp" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sessionId":"1:primary1",
+    "phone":"60182970127"
+  }'</code></pre>
+        </section>
+
         <section id="chats-list">
           <h2><span class="method get">GET</span><span class="endpoint">/chats</span></h2>
           <p class="muted">List conversation threads from session cache/history sync.</p>
@@ -242,8 +293,8 @@
         <section id="postgres">
           <h2>Postgres Message Schema (Inbound Write)</h2>
           <p class="muted">
-            On incoming messages, server writes to <code>et_messages</code> (from your <code>MESSAGE_SCHEMA.md</code> contract)
-            when <code>DATABASE_URL</code> is set.
+            On incoming messages, server writes to <code>et_messages</code> when <code>DATABASE_URL</code> is set.
+            Session and tenant are resolved via <code>et_channel_sessions</code> lookup by <code>session_identifier</code>.
           </p>
           <p class="muted">
             Note: chat/message read endpoints are backed by in-memory cache and WhatsApp history sync events.
@@ -253,20 +304,26 @@
           <table class="doc-table">
             <thead><tr><th>DB Column</th><th>Value Source</th></tr></thead>
             <tbody>
-              <tr><td><code>tenant_id</code></td><td><code>DEFAULT_TENANT_ID</code> env, else numeric prefix in <code>sessionId</code> (e.g. <code>101:sales-1</code>)</td></tr>
-              <tr><td><code>lead_id</code></td><td>Sender JID numeric part (fallback deterministic int hash)</td></tr>
+              <tr><td><code>tenant_id</code></td><td>Looked up from <code>et_channel_sessions</code> by <code>session_identifier</code></td></tr>
+              <tr><td><code>lead_id</code></td><td>Matched from <code>et_leads</code>: first by <code>whatsapp_lid</code>, then by phone digits in <code>external_id</code></td></tr>
+              <tr><td><code>channel_session_id</code></td><td><code>et_channel_sessions.id</code> for the matched session</td></tr>
               <tr><td><code>channel</code></td><td><code>"whatsapp"</code></td></tr>
-              <tr><td><code>message_id</code></td><td>Baileys <code>msg.key.id</code></td></tr>
-              <tr><td><code>timestamp</code></td><td>Baileys <code>messageTimestamp</code> converted to milliseconds</td></tr>
+              <tr><td><code>external_message_id</code></td><td>Baileys <code>msg.key.id</code></td></tr>
               <tr><td><code>direction</code></td><td><code>"inbound"</code></td></tr>
               <tr><td><code>message_type</code></td><td>Derived: text/image/video/audio/document/sticker/reaction/unknown</td></tr>
               <tr><td><code>text_content</code></td><td>conversation/ext text/caption where available</td></tr>
               <tr><td><code>media_url</code></td><td><code>null</code> (current)</td></tr>
-              <tr><td><code>raw_json</code></td><td>Full Baileys message JSON</td></tr>
+              <tr><td><code>raw_payload</code></td><td>Full Baileys message JSON (jsonb)</td></tr>
+              <tr><td><code>delivery_status</code></td><td><code>"received"</code></td></tr>
             </tbody>
           </table>
+          <h3>Lead Resolution</h3>
+          <p class="muted">
+            Leads are matched in order: (1) by <code>whatsapp_lid</code> if the sender is an <code>@lid</code> JID — fast direct lookup for pre-verified leads,
+            (2) by phone digits extracted from <code>external_id</code> — fallback for leads not yet verified via <code>POST /leads/verify-whatsapp</code>.
+          </p>
           <h3>Idempotency</h3>
-          <p class="muted">Uses DB conflict handling on unique key <code>(channel, lead_id, message_id)</code>.</p>
+          <p class="muted">Uses DB conflict handling on unique key <code>(tenant_id, channel, external_message_id)</code>.</p>
         </section>
 
         <section id="errors">

@@ -20,6 +20,7 @@ app.get('/api', (req, res) => {
             'GET /sessions',
             'GET /sessions/:id/qr',
             'POST /messages/send',
+            'POST /leads/verify-whatsapp',
             'GET /chats?sessionId=...',
             'GET /chats/:jid/messages?sessionId=...&limit=50&beforeTimestamp=...',
             'DELETE /sessions/:id'
@@ -31,30 +32,82 @@ app.get('/health', (req, res) => {
     res.json({ status: 'ok' });
 });
 
-// Debug: resolve LID to phone number
-app.get('/debug/resolve-lid/:lid', async (req, res) => {
-    const lid = req.params.lid;
-    const sessionId = String(req.query.sessionId || '').trim();
-    if (!sessionId) return res.status(400).json({ error: 'Missing sessionId query param' });
+// Verify WhatsApp number and pre-resolve LID for a lead
+app.post('/leads/verify-whatsapp', async (req, res) => {
+    const { sessionId, phone } = req.body;
+    if (!sessionId || !phone) {
+        return res.status(400).json({ error: 'Missing required fields: sessionId, phone' });
+    }
+
+    const digits = String(phone).replace(/\D/g, '');
+    if (!digits) {
+        return res.status(400).json({ error: 'Invalid phone number' });
+    }
 
     const instance = manager.getExistingInstance(sessionId);
     if (!instance) return res.status(404).json({ error: 'Session not found' });
     if (!instance.sock) return res.status(400).json({ error: 'Socket not initialized' });
+    if (!instance.sock.user) return res.status(400).json({ error: 'Session not connected' });
 
-    const hasLidMapping = !!instance.sock.signalRepository?.lidMapping;
-    const hasPNForLID = typeof instance.sock.signalRepository?.lidMapping?.getPNForLID === 'function';
-
-    let resolved = null;
-    let error = null;
-    if (hasPNForLID) {
-        try {
-            resolved = await instance.sock.signalRepository.lidMapping.getPNForLID(lid);
-        } catch (err: any) {
-            error = err.message;
+    try {
+        // 1. Check if phone is a WhatsApp user
+        const results = await instance.sock.onWhatsApp(digits + '@s.whatsapp.net');
+        const result = results?.[0];
+        if (!result?.exists) {
+            return res.json({ phone: digits, isWhatsApp: false, lid: null, leadUpdated: false });
         }
-    }
 
-    res.json({ lid, sessionId, hasLidMapping, hasPNForLID, resolved, error });
+        // 2. Resolve LID
+        let lid: string | null = null;
+        if (instance.sock.signalRepository?.lidMapping?.getLIDsForPNs) {
+            try {
+                const lidMap = await instance.sock.signalRepository.lidMapping.getLIDsForPNs([digits + '@s.whatsapp.net']);
+                if (lidMap && typeof lidMap === 'object') {
+                    const firstLid = Object.values(lidMap)[0];
+                    if (firstLid && typeof firstLid === 'string') {
+                        lid = firstLid;
+                    }
+                }
+            } catch (err: any) {
+                console.warn(`[verify-whatsapp] LID resolution failed for ${digits}: ${err.message}`);
+            }
+        }
+
+        // 3. Update lead in DB (if DATABASE_URL is set and LID was resolved)
+        let leadUpdated = false;
+        if (lid) {
+            const databaseUrl = process.env.DATABASE_URL;
+            if (databaseUrl) {
+                try {
+                    const { Pool } = require('pg');
+                    const pool = new Pool({ connectionString: databaseUrl });
+
+                    // Resolve tenant_id from session
+                    const sessionResult = await pool.query(
+                        `SELECT tenant_id FROM et_channel_sessions WHERE channel_type = 'WHATSAPP' AND session_identifier = $1 LIMIT 1`,
+                        [sessionId]
+                    );
+
+                    if (sessionResult.rows.length > 0) {
+                        const tenantId = sessionResult.rows[0].tenant_id;
+                        const updateResult = await pool.query(
+                            `UPDATE et_leads SET whatsapp_lid = $1 WHERE tenant_id = $2 AND regexp_replace(external_id, '\\D', '', 'g') = $3`,
+                            [lid, tenantId, digits]
+                        );
+                        leadUpdated = (updateResult.rowCount ?? 0) > 0;
+                    }
+
+                    await pool.end();
+                } catch (err: any) {
+                    console.error(`[verify-whatsapp] DB update failed: ${err.message}`);
+                }
+            }
+        }
+
+        res.json({ phone: digits, isWhatsApp: true, lid, leadUpdated });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // Init or Get status
