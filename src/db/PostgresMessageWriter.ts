@@ -93,7 +93,7 @@ class PostgresMessageWriter {
         return result.rows.length > 0 ? result.rows[0].id : null;
     }
 
-    async storeInboundMessage(sessionId: string, msg: proto.IWebMessageInfo): Promise<void> {
+    async storeInboundMessage(sessionId: string, msg: proto.IWebMessageInfo, resolvedSenderJid?: string): Promise<void> {
         const pool = this.getPool();
         if (!pool) return;
 
@@ -113,7 +113,8 @@ class PostgresMessageWriter {
         }
 
         // 2. Resolve lead within tenant
-        const senderJid = msg.key?.participant || remoteJid;
+        // Use resolvedSenderJid (LID→PN resolved) if provided, otherwise fall back to raw JID
+        const senderJid = resolvedSenderJid || msg.key?.participant || remoteJid;
         const leadId = await this.resolveLead(pool, session.tenantId, senderJid);
         if (leadId === null) {
             console.warn('[Postgres] Lead not found in et_leads', {

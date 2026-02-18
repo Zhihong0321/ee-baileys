@@ -173,9 +173,25 @@ export class WhatsAppInstance {
                     // Deduplication
                     if (deduper.shouldIgnore(msg.key.id!)) continue;
 
+                    // Resolve LID to phone number JID for lead matching
+                    let resolvedSenderJid: string | undefined;
+                    if (remoteJid?.endsWith('@lid') && this.sock?.signalRepository?.lidMapping) {
+                        try {
+                            const pnJid = await this.sock.signalRepository.lidMapping.getPNForLID(remoteJid);
+                            if (pnJid) {
+                                resolvedSenderJid = pnJid;
+                                console.log(`[${this.sessionId}] LID resolved: ${remoteJid} → ${pnJid}`);
+                            } else {
+                                console.warn(`[${this.sessionId}] LID mapping not found for ${remoteJid}`);
+                            }
+                        } catch (err: any) {
+                            console.warn(`[${this.sessionId}] LID resolution failed: ${err.message}`);
+                        }
+                    }
+
                     console.log(`[${this.sessionId}] New message from ${msg.pushName || remoteJid}`);
 
-                    await postgresMessageWriter.storeInboundMessage(this.sessionId, msg);
+                    await postgresMessageWriter.storeInboundMessage(this.sessionId, msg, resolvedSenderJid);
 
                     dispatchWebhook({
                         sessionId: this.sessionId,
