@@ -53,7 +53,7 @@ class PostgresMessageWriter {
         const sql = `
             SELECT id, tenant_id
             FROM et_channel_sessions
-            WHERE channel_type = 'whatsapp'
+            WHERE channel_type = 'WHATSAPP'
               AND session_identifier = $1
             LIMIT 1
         `;
