@@ -153,12 +153,12 @@
 
         <section id="leads-verify">
           <h2><span class="method post">POST</span><span class="endpoint">/leads/verify-whatsapp</span></h2>
-          <p class="muted">Check if a phone number is a WhatsApp user and pre-resolve their LID (Linked ID). Stores the LID on the matching lead in <code>et_leads.whatsapp_lid</code> for fast inbound message matching.</p>
+          <p class="muted">Check if a phone number is a WhatsApp user and pre-resolve their LID (Linked ID). Auto-initializes the session if not already in memory. Stores verification status (<code>is_whatsapp_valid</code>, <code>last_verify_at</code>) and LID on the matching lead in <code>et_leads</code>.</p>
           <h3>Request Body</h3>
           <table class="doc-table">
             <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
             <tbody>
-              <tr><td><code>sessionId</code></td><td>string</td><td>yes</td><td>Connected session ID (must be online)</td></tr>
+              <tr><td><code>sessionId</code></td><td>string</td><td>yes</td><td>Session ID — will be auto-restored if not in memory (must be connectable)</td></tr>
               <tr><td><code>phone</code></td><td>string</td><td>yes</td><td>Phone number (digits only, with country code, e.g. <code>60182970127</code>)</td></tr>
             </tbody>
           </table>
@@ -167,19 +167,29 @@
   "sessionId": "1:primary1",
   "phone": "60182970127"
 }</code></pre>
-          <h3>Response 200</h3>
+          <h3>Response 200 (verified with LID)</h3>
           <pre class="code-block"><code>{
   "phone": "60182970127",
   "isWhatsApp": true,
   "lid": "157535172559093@lid",
-  "leadUpdated": true
+  "leadUpdated": true,
+  "verifyError": null
+}</code></pre>
+          <h3>Response 200 (verified, LID not yet available)</h3>
+          <pre class="code-block"><code>{
+  "phone": "60182970127",
+  "isWhatsApp": true,
+  "lid": null,
+  "leadUpdated": true,
+  "verifyError": null
 }</code></pre>
           <h3>Response 200 (not on WhatsApp)</h3>
           <pre class="code-block"><code>{
   "phone": "10000000000",
   "isWhatsApp": false,
   "lid": null,
-  "leadUpdated": false
+  "leadUpdated": true,
+  "verifyError": null
 }</code></pre>
           <h3>Response Fields</h3>
           <table class="doc-table">
@@ -187,8 +197,19 @@
             <tbody>
               <tr><td><code>phone</code></td><td>string</td><td>Normalized phone digits</td></tr>
               <tr><td><code>isWhatsApp</code></td><td>boolean</td><td>Whether the number is registered on WhatsApp</td></tr>
-              <tr><td><code>lid</code></td><td>string | null</td><td>Resolved LID JID (e.g. <code>157535172559093@lid</code>), or null if unavailable</td></tr>
-              <tr><td><code>leadUpdated</code></td><td>boolean</td><td>Whether the LID was saved to <code>et_leads.whatsapp_lid</code></td></tr>
+              <tr><td><code>lid</code></td><td>string | null</td><td>Resolved LID JID (e.g. <code>157535172559093@lid</code>), or null if not yet available</td></tr>
+              <tr><td><code>leadUpdated</code></td><td>boolean</td><td>Whether the lead record in <code>et_leads</code> was updated</td></tr>
+              <tr><td><code>verifyError</code></td><td>string | null</td><td>Error message if the WhatsApp check itself failed (e.g. stream error)</td></tr>
+            </tbody>
+          </table>
+          <h3>DB Columns Updated on <code>et_leads</code></h3>
+          <table class="doc-table">
+            <thead><tr><th>Column</th><th>Type</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><code>whatsapp_lid</code></td><td>VARCHAR(255)</td><td>LID JID (only set when resolved, preserved across re-verifications)</td></tr>
+              <tr><td><code>is_whatsapp_valid</code></td><td>BOOLEAN</td><td><code>true</code> if number exists on WhatsApp, <code>false</code> otherwise</td></tr>
+              <tr><td><code>last_verify_at</code></td><td>TIMESTAMPTZ</td><td>When the verification was last performed</td></tr>
+              <tr><td><code>verify_error</code></td><td>TEXT</td><td>Error message if verification failed, null on success</td></tr>
             </tbody>
           </table>
           <h3>cURL Example</h3>
