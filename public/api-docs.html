@@ -223,7 +223,7 @@
 
         <section id="chats-list">
           <h2><span class="method get">GET</span><span class="endpoint">/chats</span></h2>
-          <p class="muted">List conversation threads from session cache/history sync.</p>
+          <p class="muted">List conversation threads from session cache/history sync. Sorted by most recent message first.</p>
           <h3>Query Params</h3>
           <table class="doc-table">
             <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
@@ -238,28 +238,51 @@
   "count": 2,
   "chats": [
     {
-      "id": "14155552671@s.whatsapp.net",
+      "id": "60123456789@s.whatsapp.net",
+      "phoneNumber": "60123456789",
       "name": "Alice",
-      "unreadCount": 0,
+      "unreadCount": 2,
       "archived": false,
       "muteEndTime": null,
       "isGroup": false,
       "lastMessageTimestamp": 1708186800000
+    },
+    {
+      "id": "120363142020267782@lid",
+      "phoneNumber": null,
+      "name": null,
+      "unreadCount": 0,
+      "archived": false,
+      "muteEndTime": null,
+      "isGroup": false,
+      "lastMessageTimestamp": 1708100000000
     }
   ]
 }</code></pre>
+          <h3>Response Fields</h3>
+          <table class="doc-table">
+            <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><code>id</code></td><td>string</td><td>WhatsApp JID — either <code>@s.whatsapp.net</code> (phone) or <code>@lid</code> (anonymous) or <code>@g.us</code> (group)</td></tr>
+              <tr><td><code>phoneNumber</code></td><td>string | null</td><td>Extracted phone digits (e.g. <code>"60123456789"</code>). <code>null</code> for LID contacts or groups — WhatsApp's new privacy architecture does not expose phone numbers in bulk history sync for these contacts.</td></tr>
+              <tr><td><code>name</code></td><td>string | null</td><td>Contact name from your phone book, or <code>null</code> if not in contacts</td></tr>
+              <tr><td><code>unreadCount</code></td><td>number</td><td>Unread message count</td></tr>
+              <tr><td><code>isGroup</code></td><td>boolean</td><td>Whether this is a group chat</td></tr>
+              <tr><td><code>lastMessageTimestamp</code></td><td>number (ms) | null</td><td>Unix timestamp (milliseconds) of last message</td></tr>
+            </tbody>
+          </table>
           <h3>cURL Example</h3>
           <pre class="code-block"><code>curl "https://YOUR-DOMAIN/chats?sessionId=101:sales-1&limit=100"</code></pre>
         </section>
 
         <section id="chats-messages">
           <h2><span class="method get">GET</span><span class="endpoint">/chats/:jid/messages</span></h2>
-          <p class="muted">Read messages for one chat JID from session cache/history sync.</p>
+          <p class="muted">Read messages for one chat JID from the in-memory session cache/history sync. Messages are returned oldest-first. Use <code>id</code> from <code>GET /chats</code> as the <code>:jid</code> path parameter.</p>
           <h3>Path Params</h3>
           <table class="doc-table">
             <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
             <tbody>
-              <tr><td><code>jid</code></td><td>string</td><td>yes</td><td>Chat JID, URL-encoded when needed</td></tr>
+              <tr><td><code>jid</code></td><td>string</td><td>yes</td><td>Chat JID from <code>GET /chats</code> — URL-encode the <code>@</code> as <code>%40</code></td></tr>
             </tbody>
           </table>
           <h3>Query Params</h3>
@@ -268,29 +291,47 @@
             <tbody>
               <tr><td><code>sessionId</code></td><td>string</td><td>yes</td><td>Connected session ID</td></tr>
               <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max messages returned (default 50, max 500)</td></tr>
-              <tr><td><code>beforeTimestamp</code></td><td>number (ms)</td><td>no</td><td>Return messages older than this timestamp</td></tr>
+              <tr><td><code>beforeTimestamp</code></td><td>number (ms)</td><td>no</td><td>Return messages older than this Unix timestamp (ms) — use for pagination</td></tr>
             </tbody>
           </table>
           <h3>Response 200</h3>
           <pre class="code-block"><code>{
   "sessionId": "101:sales-1",
-  "jid": "14155552671@s.whatsapp.net",
-  "count": 1,
+  "jid": "60123456789@s.whatsapp.net",
+  "count": 2,
   "messages": [
     {
-      "id": "3EB0...",
-      "remoteJid": "14155552671@s.whatsapp.net",
-      "participant": null,
+      "id": "3EB0A1B2C3D4",
+      "phoneNumber": "60123456789",
       "fromMe": false,
       "timestamp": 1708186800000,
       "type": "conversation",
-      "content": "Hello",
-      "raw": { }
+      "content": "Hello, I'm interested in your product"
+    },
+    {
+      "id": "3EB0A1B2C3D5",
+      "phoneNumber": "60123456789",
+      "fromMe": true,
+      "timestamp": 1708186860000,
+      "type": "conversation",
+      "content": "Hi! Thanks for reaching out."
     }
   ]
 }</code></pre>
+          <h3>Response Fields (per message)</h3>
+          <table class="doc-table">
+            <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><code>id</code></td><td>string | null</td><td>WhatsApp message ID</td></tr>
+              <tr><td><code>phoneNumber</code></td><td>string | null</td><td>Phone number of the contact. <code>null</code> for LID-only contacts</td></tr>
+              <tr><td><code>fromMe</code></td><td>boolean</td><td><code>true</code> = sent by you, <code>false</code> = received from contact</td></tr>
+              <tr><td><code>timestamp</code></td><td>number (ms)</td><td>Message time as Unix timestamp (milliseconds)</td></tr>
+              <tr><td><code>type</code></td><td>string</td><td>Message type: <code>conversation</code>, <code>extendedTextMessage</code>, <code>imageMessage</code>, <code>videoMessage</code>, <code>audioMessage</code>, <code>documentMessage</code>, etc.</td></tr>
+              <tr><td><code>content</code></td><td>string</td><td>Text content — body for text messages, caption for media. Empty string for non-text types.</td></tr>
+            </tbody>
+          </table>
           <h3>cURL Example</h3>
-          <pre class="code-block"><code>curl "https://YOUR-DOMAIN/chats/14155552671%40s.whatsapp.net/messages?sessionId=101:sales-1&limit=50"</code></pre>
+          <pre class="code-block"><code>curl "https://YOUR-DOMAIN/chats/60123456789%40s.whatsapp.net/messages?sessionId=101:sales-1&limit=50"</code></pre>
         </section>
 
         <section id="sessions-delete">
