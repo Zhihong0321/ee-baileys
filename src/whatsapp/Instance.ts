@@ -213,9 +213,12 @@ export class WhatsAppInstance {
 
     getChats(limit: number = 100) {
         const items = Array.from(this.chats.values());
-        items.sort((a, b) => this.getChatSortTimestamp(b) - this.getChatSortTimestamp(a));
-        return items.slice(0, limit).map(chat => ({
+        // Filter out chats that are still stored under a LID JID (no phone number resolvable)
+        const filtered = items.filter(chat => !String(chat.id || '').endsWith('@lid'));
+        filtered.sort((a, b) => this.getChatSortTimestamp(b) - this.getChatSortTimestamp(a));
+        return filtered.slice(0, limit).map(chat => ({
             id: chat.id,
+            phoneNumber: this.extractPhoneNumber(chat.id),
             name: chat.name || chat.formattedName || null,
             unreadCount: chat.unreadCount || 0,
             archived: !!chat.archived,
@@ -226,7 +229,9 @@ export class WhatsAppInstance {
     }
 
     getChatMessages(jid: string, limit: number = 50, beforeTimestamp?: number) {
-        const map = this.messagesByChat.get(jid);
+        // Normalise the requested JID so a phone-number lookup always hits
+        const storageJid = this.resolveStorageJid(jid);
+        const map = this.messagesByChat.get(storageJid);
         if (!map) return [];
 
         let items = Array.from(map.values());
@@ -242,20 +247,22 @@ export class WhatsAppInstance {
 
         return items.map(msg => ({
             id: msg.key?.id || null,
-            remoteJid: msg.key?.remoteJid || null,
-            participant: msg.key?.participant || null,
+            phoneNumber: this.extractPhoneNumber(storageJid),
             fromMe: !!msg.key?.fromMe,
             timestamp: this.messageTimestampMs(msg),
             type: msg.message ? Object.keys(msg.message)[0] : 'unknown',
             content: this.extractMessageText(msg),
-            raw: msg,
         }));
     }
 
     private upsertChats(chats: any[]) {
         for (const chat of chats || []) {
-            const jid = this.resolveChatJid(chat);
-            if (!jid) continue;
+            const rawJid = this.resolveChatJid(chat);
+            if (!rawJid) continue;
+
+            // If WhatsApp gives us a LID JID, prefer the alt phone-number JID when available
+            const jid = this.resolveStorageJid(rawJid, (chat as any).remoteJidAlt);
+
             const prev = this.chats.get(jid) || {};
             this.chats.set(jid, {
                 ...prev,
@@ -268,8 +275,12 @@ export class WhatsAppInstance {
 
     private cacheMessages(messages: proto.IWebMessageInfo[]) {
         for (const msg of messages || []) {
-            const jid = msg.key?.remoteJid;
-            if (!jid) continue;
+            const rawJid = msg.key?.remoteJid;
+            if (!rawJid) continue;
+
+            // Normalise LID → phone-number JID using the alt field when present
+            const key = msg.key as any;
+            const jid = this.resolveStorageJid(rawJid, key?.remoteJidAlt);
 
             const messageId = msg.key?.id || `${this.messageTimestampMs(msg)}-${Math.random()}`;
             const existing = this.messagesByChat.get(jid) || new Map<string, proto.IWebMessageInfo>();
@@ -289,6 +300,26 @@ export class WhatsAppInstance {
 
     private resolveChatJid(chat: any): string | undefined {
         return chat?.id || chat?.jid;
+    }
+
+    /**
+     * If the primary JID is a LID (@lid), swap it for the phone-number JID (@s.whatsapp.net)
+     * when an alternate is available. Otherwise return primary as-is.
+     */
+    private resolveStorageJid(primary: string, alt?: string): string {
+        if (primary?.endsWith('@lid') && alt && alt.endsWith('@s.whatsapp.net')) {
+            return alt;
+        }
+        return primary;
+    }
+
+    /**
+     * Extract a plain phone number string from a phone-number JID.
+     * Returns null for groups or LID JIDs.
+     */
+    private extractPhoneNumber(jid: string): string | null {
+        if (!jid || !jid.endsWith('@s.whatsapp.net')) return null;
+        return jid.split('@')[0].split(':')[0];
     }
 
     private getChatSortTimestamp(chat: any): number {
