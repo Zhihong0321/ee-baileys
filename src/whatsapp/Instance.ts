@@ -213,10 +213,11 @@ export class WhatsAppInstance {
 
     getChats(limit: number = 100) {
         const items = Array.from(this.chats.values());
-        // Filter out chats that are still stored under a LID JID (no phone number resolvable)
-        const filtered = items.filter(chat => !String(chat.id || '').endsWith('@lid'));
-        filtered.sort((a, b) => this.getChatSortTimestamp(b) - this.getChatSortTimestamp(a));
-        return filtered.slice(0, limit).map(chat => ({
+        // NOTE: WhatsApp history sync stores many contacts under LID JIDs (@lid).
+        // We cannot resolve LID → phone number from chat objects alone (no remoteJidAlt),
+        // so we keep ALL chats and return phoneNumber: null for LID-only contacts.
+        items.sort((a, b) => this.getChatSortTimestamp(b) - this.getChatSortTimestamp(a));
+        return items.slice(0, limit).map(chat => ({
             id: chat.id,
             phoneNumber: this.extractPhoneNumber(chat.id),
             name: chat.name || chat.formattedName || null,
@@ -257,12 +258,11 @@ export class WhatsAppInstance {
 
     private upsertChats(chats: any[]) {
         for (const chat of chats || []) {
-            const rawJid = this.resolveChatJid(chat);
-            if (!rawJid) continue;
-
-            // If WhatsApp gives us a LID JID, prefer the alt phone-number JID when available
-            const jid = this.resolveStorageJid(rawJid, (chat as any).remoteJidAlt);
-
+            const jid = this.resolveChatJid(chat);
+            if (!jid) continue;
+            // Chat objects do NOT carry remoteJidAlt — we store under whatever JID
+            // WhatsApp gives us (phone-number or LID). resolveStorageJid is used
+            // only for message keys where remoteJidAlt is actually present.
             const prev = this.chats.get(jid) || {};
             this.chats.set(jid, {
                 ...prev,
