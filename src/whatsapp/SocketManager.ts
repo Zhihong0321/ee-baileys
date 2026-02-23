@@ -1,7 +1,7 @@
 import { WhatsAppInstance } from './Instance';
 import { staggerer } from '../lib/Staggerer';
 import fs from 'fs-extra';
-import path from 'path';
+import { SESSIONS_BASE_DIR } from '../config/paths';
 
 export class WhatsAppManager {
     private instances = new Map<string, WhatsAppInstance>();
@@ -25,9 +25,10 @@ export class WhatsAppManager {
     }
 
     async restoreSessions() {
-        const sessionsDir = path.join(process.cwd(), 'sessions');
+        const sessionsDir = SESSIONS_BASE_DIR;
         if (await fs.pathExists(sessionsDir)) {
-            const dirs = await fs.readdir(sessionsDir);
+            const entries = await fs.readdir(sessionsDir);
+            const dirs = entries.filter(id => id !== '.DS_Store');
             console.log(`[Manager] Restoring ${dirs.length} sessions...`);
             for (const id of dirs) {
                 this.getInstance(id).catch(err => {

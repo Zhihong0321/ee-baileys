@@ -5,7 +5,8 @@ import makeWASocket, {
     makeCacheableSignalKeyStore,
     ConnectionState,
     WASocket,
-    proto
+    proto,
+    downloadMediaMessage
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import path from 'path';
@@ -16,6 +17,7 @@ import { dispatchWebhook, formatMessage } from '../utils/webhook';
 import { Mutex } from 'async-mutex';
 import QRCode from 'qrcode';
 import { postgresMessageWriter } from '../db/PostgresMessageWriter';
+import { resolveSessionPath } from '../config/paths';
 
 const logger = pino({ level: 'info' });
 
@@ -36,7 +38,7 @@ export class WhatsAppInstance {
     async init() {
         try {
             console.log(`[${this.sessionId}] Initializing session...`);
-            const sessionPath = path.join(process.cwd(), 'sessions', this.sessionId);
+            const sessionPath = resolveSessionPath(this.sessionId);
             await fs.ensureDir(sessionPath);
             console.log(`[${this.sessionId}] Session path: ${sessionPath}`);
 
@@ -182,7 +184,9 @@ export class WhatsAppInstance {
 
                     console.log(`[${this.sessionId}] New message from ${msg.pushName || senderJid} (jid=${senderJid})`);
 
-                    await postgresMessageWriter.storeInboundMessage(this.sessionId, msg, senderJid);
+                    const savedMediaPath = await this.persistSupportedInboundMedia(msg);
+
+                    await postgresMessageWriter.storeInboundMessage(this.sessionId, msg, senderJid, savedMediaPath);
 
                     dispatchWebhook({
                         sessionId: this.sessionId,
@@ -357,5 +361,165 @@ export class WhatsAppInstance {
             msg.message?.imageMessage?.caption ||
             msg.message?.videoMessage?.caption ||
             '';
+    }
+
+    private async persistSupportedInboundMedia(msg: proto.IWebMessageInfo): Promise<string | null> {
+        if (!this.sock || !msg.message) return null;
+
+        const normalizedMessage = this.normalizeMessage(msg.message);
+        if (!normalizedMessage) return null;
+
+        const mediaMeta = this.resolveSupportedMediaMeta(msg, normalizedMessage);
+        if (!mediaMeta) return null;
+
+        try {
+            const mediaBuffer = await downloadMediaMessage(
+                msg as any,
+                'buffer',
+                {},
+                {
+                    logger,
+                    reuploadRequest: this.sock.updateMediaMessage
+                }
+            );
+
+            const baseDir = path.join(resolveSessionPath(this.sessionId), 'media', mediaMeta.kind, this.currentDatePath());
+            await fs.ensureDir(baseDir);
+
+            const fileName = this.buildMediaFileName(msg.key?.id, mediaMeta.originalFileName, mediaMeta.defaultExt, mediaMeta.mimeType);
+            const filePath = path.join(baseDir, fileName);
+            await fs.writeFile(filePath, mediaBuffer);
+
+            console.log(`[${this.sessionId}] Saved inbound ${mediaMeta.kind}: ${filePath}`);
+            return filePath;
+        } catch (err: any) {
+            console.error(`[${this.sessionId}] Failed saving inbound media ${msg.key?.id || 'unknown'}: ${err.message}`);
+            return null;
+        }
+    }
+
+    private normalizeMessage(message: proto.IMessage): proto.IMessage | null {
+        let current: any = message;
+
+        while (current) {
+            if (current.ephemeralMessage?.message) {
+                current = current.ephemeralMessage.message;
+                continue;
+            }
+            if (current.viewOnceMessage?.message) {
+                current = current.viewOnceMessage.message;
+                continue;
+            }
+            if (current.viewOnceMessageV2?.message) {
+                current = current.viewOnceMessageV2.message;
+                continue;
+            }
+            if (current.viewOnceMessageV2Extension?.message) {
+                current = current.viewOnceMessageV2Extension.message;
+                continue;
+            }
+            if (current.documentWithCaptionMessage?.message) {
+                current = current.documentWithCaptionMessage.message;
+                continue;
+            }
+            break;
+        }
+
+        return current || null;
+    }
+
+    private resolveSupportedMediaMeta(msg: proto.IWebMessageInfo, message: proto.IMessage): {
+        kind: 'voice' | 'pdf' | 'image';
+        defaultExt: string;
+        mimeType?: string | null;
+        originalFileName?: string | null;
+    } | null {
+        if (message.audioMessage) {
+            return {
+                kind: 'voice',
+                defaultExt: 'ogg',
+                mimeType: message.audioMessage.mimetype
+            };
+        }
+
+        if (message.imageMessage) {
+            return {
+                kind: 'image',
+                defaultExt: 'jpg',
+                mimeType: message.imageMessage.mimetype
+            };
+        }
+
+        if (message.documentMessage) {
+            const mime = (message.documentMessage.mimetype || '').toLowerCase();
+            const fileName = message.documentMessage.fileName || '';
+            const isPdf = mime === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf');
+            if (isPdf) {
+                return {
+                    kind: 'pdf',
+                    defaultExt: 'pdf',
+                    mimeType: message.documentMessage.mimetype,
+                    originalFileName: fileName || `${msg.key?.id || 'document'}.pdf`
+                };
+            }
+        }
+
+        return null;
+    }
+
+    private currentDatePath(): string {
+        const now = new Date();
+        const year = now.getUTCFullYear();
+        const month = `${now.getUTCMonth() + 1}`.padStart(2, '0');
+        const day = `${now.getUTCDate()}`.padStart(2, '0');
+        return path.join(`${year}`, month, day);
+    }
+
+    private buildMediaFileName(messageId: string | null | undefined, originalFileName: string | null | undefined, defaultExt: string, mimeType?: string | null): string {
+        const safeMessageId = this.sanitizeFileComponent(messageId || `${Date.now()}`);
+        const ext = this.resolveExtension(mimeType, defaultExt);
+        const originalBase = originalFileName ? path.basename(originalFileName) : '';
+        const safeOriginalBase = this.sanitizeFileComponent(originalBase);
+
+        if (safeOriginalBase) {
+            return `${safeMessageId}-${safeOriginalBase}`;
+        }
+        return `${safeMessageId}.${ext}`;
+    }
+
+    private resolveExtension(mimeType: string | null | undefined, fallback: string): string {
+        if (!mimeType) return fallback;
+        const cleanMime = mimeType.split(';')[0].trim().toLowerCase();
+
+        const known: Record<string, string> = {
+            'audio/ogg': 'ogg',
+            'audio/opus': 'opus',
+            'audio/mpeg': 'mp3',
+            'audio/mp4': 'm4a',
+            'audio/aac': 'aac',
+            'audio/amr': 'amr',
+            'application/pdf': 'pdf',
+            'image/jpeg': 'jpg',
+            'image/jpg': 'jpg',
+            'image/png': 'png',
+            'image/webp': 'webp',
+            'image/heic': 'heic'
+        };
+
+        if (known[cleanMime]) {
+            return known[cleanMime];
+        }
+
+        const slashIndex = cleanMime.indexOf('/');
+        if (slashIndex >= 0 && slashIndex < cleanMime.length - 1) {
+            const derived = cleanMime.slice(slashIndex + 1).replace(/[^a-z0-9]/g, '');
+            if (derived) return derived;
+        }
+
+        return fallback;
+    }
+
+    private sanitizeFileComponent(input: string): string {
+        return input.replace(/[^a-zA-Z0-9._-]/g, '_');
     }
 }
