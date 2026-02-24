@@ -10,6 +10,10 @@ app.use(express.json());
 const publicDir = path.join(process.cwd(), 'public');
 app.use(express.static(publicDir));
 
+// Serve downloaded media files (voice notes, etc.)
+const mediaDir = path.join(process.cwd(), 'media');
+app.use('/media', express.static(mediaDir));
+
 // Basic API info/health endpoints
 app.get('/api', (req, res) => {
     res.json({

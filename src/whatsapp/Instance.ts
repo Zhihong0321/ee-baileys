@@ -3,10 +3,10 @@ import makeWASocket, {
     DisconnectReason,
     fetchLatestBaileysVersion,
     makeCacheableSignalKeyStore,
+    downloadMediaMessage,
     ConnectionState,
     WASocket,
     proto,
-    downloadMediaMessage
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import path from 'path';
@@ -184,14 +184,15 @@ export class WhatsAppInstance {
 
                     console.log(`[${this.sessionId}] New message from ${msg.pushName || senderJid} (jid=${senderJid})`);
 
-                    const savedMediaPath = await this.persistSupportedInboundMedia(msg);
+                    // Download and decrypt supported media (voice, image, PDF) and return HTTP URL
+                    const mediaUrl = await this.persistSupportedInboundMedia(msg);
 
-                    await postgresMessageWriter.storeInboundMessage(this.sessionId, msg, senderJid, savedMediaPath);
+                    await postgresMessageWriter.storeInboundMessage(this.sessionId, msg, senderJid, mediaUrl);
 
                     dispatchWebhook({
                         sessionId: this.sessionId,
                         event: 'message',
-                        data: formatMessage(msg)
+                        data: formatMessage(msg, mediaUrl)
                     });
                 }
             });
@@ -363,6 +364,11 @@ export class WhatsAppInstance {
             '';
     }
 
+    /**
+     * Download, decrypt, and save supported inbound media (voice, image, PDF).
+     * Saves to the global media/ directory served by Express and returns an HTTP URL,
+     * or null if the message has no supported media or download fails.
+     */
     private async persistSupportedInboundMedia(msg: proto.IWebMessageInfo): Promise<string | null> {
         if (!this.sock || !msg.message) return null;
 
@@ -383,15 +389,17 @@ export class WhatsAppInstance {
                 }
             );
 
-            const baseDir = path.join(resolveSessionPath(this.sessionId), 'media', mediaMeta.kind, this.currentDatePath());
-            await fs.ensureDir(baseDir);
-
             const fileName = this.buildMediaFileName(msg.key?.id, mediaMeta.originalFileName, mediaMeta.defaultExt, mediaMeta.mimeType);
-            const filePath = path.join(baseDir, fileName);
+            const mediaDir = path.join(process.cwd(), 'media', mediaMeta.kind);
+            await fs.ensureDir(mediaDir);
+
+            const filePath = path.join(mediaDir, fileName);
             await fs.writeFile(filePath, mediaBuffer);
 
-            console.log(`[${this.sessionId}] Saved inbound ${mediaMeta.kind}: ${filePath}`);
-            return filePath;
+            const baseUrl = (process.env.MEDIA_BASE_URL || `http://localhost:${process.env.PORT || 3000}`).replace(/\/$/, '');
+            const url = `${baseUrl}/media/${mediaMeta.kind}/${fileName}`;
+            console.log(`[${this.sessionId}] Saved inbound ${mediaMeta.kind}: ${url}`);
+            return url;
         } catch (err: any) {
             console.error(`[${this.sessionId}] Failed saving inbound media ${msg.key?.id || 'unknown'}: ${err.message}`);
             return null;
@@ -465,14 +473,6 @@ export class WhatsAppInstance {
         }
 
         return null;
-    }
-
-    private currentDatePath(): string {
-        const now = new Date();
-        const year = now.getUTCFullYear();
-        const month = `${now.getUTCMonth() + 1}`.padStart(2, '0');
-        const day = `${now.getUTCDate()}`.padStart(2, '0');
-        return path.join(`${year}`, month, day);
     }
 
     private buildMediaFileName(messageId: string | null | undefined, originalFileName: string | null | undefined, defaultExt: string, mimeType?: string | null): string {

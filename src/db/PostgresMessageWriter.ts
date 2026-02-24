@@ -105,9 +105,9 @@ class PostgresMessageWriter {
      * @param sessionId   - The Baileys session identifier (maps to et_channel_sessions)
      * @param msg         - Raw Baileys message object
      * @param senderJid   - Always a phone-number JID (@s.whatsapp.net), resolved by Instance.ts
-     * @param mediaPath   - Local filesystem path for persisted inbound media (if any)
+     * @param mediaUrl    - HTTP URL for downloaded/decrypted inbound media (if any)
      */
-    async storeInboundMessage(sessionId: string, msg: proto.IWebMessageInfo, senderJid: string, mediaPath?: string | null): Promise<void> {
+    async storeInboundMessage(sessionId: string, msg: proto.IWebMessageInfo, senderJid: string, mediaUrl?: string | null): Promise<void> {
         const pool = this.getPool();
         if (!pool) return;
 
@@ -139,7 +139,7 @@ class PostgresMessageWriter {
 
         const messageType = this.resolveMessageType(msg);
         const textContent = this.resolveTextContent(msg);
-        const mediaUrl = mediaPath || null;
+        const resolvedMediaUrl = mediaUrl ?? null;
 
         // 3. Upsert into et_messages (thread_id assigned automatically by DB trigger)
         const sql = `
@@ -168,7 +168,7 @@ class PostgresMessageWriter {
                 messageId,
                 messageType,
                 textContent,
-                mediaUrl,
+                resolvedMediaUrl,
                 JSON.stringify(msg),
             ]);
 

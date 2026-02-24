@@ -19,7 +19,7 @@ export const dispatchWebhook = async (payload: WebhookPayload) => {
     }
 };
 
-export const formatMessage = (msg: WAMessage) => {
+export const formatMessage = (msg: WAMessage, mediaUrl?: string | null) => {
     const content = msg.message?.conversation ||
         msg.message?.extendedTextMessage?.text ||
         msg.message?.imageMessage?.caption ||
@@ -33,6 +33,7 @@ export const formatMessage = (msg: WAMessage) => {
         timestamp: msg.messageTimestamp,
         content,
         type: msg.message ? Object.keys(msg.message)[0] : 'unknown',
-        isGroup: msg.key.remoteJid?.endsWith('@g.us')
+        isGroup: msg.key.remoteJid?.endsWith('@g.us'),
+        mediaUrl: mediaUrl ?? null,
     };
 };
