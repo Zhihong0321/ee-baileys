@@ -396,8 +396,13 @@ export class WhatsAppInstance {
             const filePath = path.join(mediaDir, fileName);
             await fs.writeFile(filePath, mediaBuffer);
 
-            const baseUrl = (process.env.MEDIA_BASE_URL || `http://localhost:${process.env.PORT || 3000}`).replace(/\/$/, '');
-            const url = `${baseUrl}/media/${mediaMeta.kind}/${fileName}`;
+            const relativeUrl = `/media/${mediaMeta.kind}/${fileName}`;
+            const baseUrl = this.resolvePublicMediaBaseUrl();
+            const url = baseUrl ? `${baseUrl}${relativeUrl}` : relativeUrl;
+
+            if (!baseUrl) {
+                console.warn(`[${this.sessionId}] MEDIA_BASE_URL not set. Storing relative media URL: ${relativeUrl}`);
+            }
             console.log(`[${this.sessionId}] Saved inbound ${mediaMeta.kind}: ${url}`);
             return url;
         } catch (err: any) {
@@ -521,5 +526,20 @@ export class WhatsAppInstance {
 
     private sanitizeFileComponent(input: string): string {
         return input.replace(/[^a-zA-Z0-9._-]/g, '_');
+    }
+
+    private resolvePublicMediaBaseUrl(): string | null {
+        const configured = (process.env.MEDIA_BASE_URL || '').trim();
+        if (configured) {
+            return configured.replace(/\/+$/, '');
+        }
+
+        const railwayDomain = (process.env.RAILWAY_PUBLIC_DOMAIN || process.env.RAILWAY_STATIC_URL || '').trim();
+        if (railwayDomain) {
+            const normalizedDomain = railwayDomain.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+            return `https://${normalizedDomain}`;
+        }
+
+        return null;
     }
 }
