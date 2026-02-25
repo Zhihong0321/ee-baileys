@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import axios from 'axios';
 import { manager } from '../whatsapp/SocketManager';
 import QRCode from 'qrcode';
 import { postgresMessageWriter } from '../db/PostgresMessageWriter';
@@ -105,6 +106,14 @@ app.post('/messages/send', async (req, res) => {
         const instance = await manager.getInstance(sessionId);
         if (!instance.sock) throw new Error('Socket not initialized');
 
+        // Ensure the session is actually "Connected"
+        if (!instance.sock.user) {
+            return res.status(401).json({
+                error: 'Session not connected',
+                message: 'Your session is initializing or disconnected. Please ensure you have scanned the QR code.'
+            });
+        }
+
         const jid = to.includes('@') ? to : `${to}@s.whatsapp.net`;
         const options: any = {};
 
@@ -113,19 +122,35 @@ app.post('/messages/send', async (req, res) => {
         }
 
         let messageContent: any = {};
+
+        // Helper to get buffer from URL
+        const getBuffer = async (url: string) => {
+            const res = await axios.get(url, { responseType: 'arraybuffer' });
+            return Buffer.from(res.data, 'binary');
+        };
+
         if (audioUrl) {
+            console.log(`[${sessionId}] Downloading audio: ${audioUrl}`);
+            const buffer = await getBuffer(audioUrl);
+            const defaultMime = ptt ? 'audio/ogg; codecs=opus' : 'audio/mp4';
             messageContent = {
-                audio: { url: audioUrl },
-                mimetype: mimetype || 'audio/ogg; codecs=opus',
+                audio: buffer,
+                mimetype: mimetype || defaultMime,
                 ptt: !!ptt
             };
         } else if (imageUrl) {
-            messageContent = { image: { url: imageUrl }, caption: text };
+            console.log(`[${sessionId}] Downloading image: ${imageUrl}`);
+            const buffer = await getBuffer(imageUrl);
+            messageContent = { image: buffer, caption: text };
         } else if (videoUrl) {
-            messageContent = { video: { url: videoUrl }, caption: text };
+            console.log(`[${sessionId}] Downloading video: ${videoUrl}`);
+            const buffer = await getBuffer(videoUrl);
+            messageContent = { video: buffer, caption: text };
         } else if (documentUrl) {
+            console.log(`[${sessionId}] Downloading document: ${documentUrl}`);
+            const buffer = await getBuffer(documentUrl);
             messageContent = {
-                document: { url: documentUrl },
+                document: buffer,
                 mimetype: mimetype || 'application/pdf',
                 fileName: fileName || text || 'document'
             };
@@ -133,7 +158,12 @@ app.post('/messages/send', async (req, res) => {
             messageContent = { text };
         }
 
+        const finalMime = (messageContent as any).mimetype || 'N/A';
+        const contentKey = Object.keys(messageContent)[0];
+        const isBuffer = Buffer.isBuffer((messageContent as any)[contentKey]);
+        console.log(`[${sessionId}] Ready to send ${contentKey}. Buffer: ${isBuffer}, Mime: ${finalMime}, PTT: ${!!ptt}`);
         const result = await instance.sock.sendMessage(jid, messageContent, options);
+        console.log(`[${sessionId}] Message sent successfully. ID: ${result?.key?.id}`);
 
         // Store outbound message in Postgres asynchronously
         const sentMediaUrl = audioUrl || imageUrl || videoUrl || documentUrl || null;
