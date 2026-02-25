@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import { manager } from '../whatsapp/SocketManager';
 import QRCode from 'qrcode';
+import { postgresMessageWriter } from '../db/PostgresMessageWriter';
 
 const app = express();
 app.use(express.json());
@@ -90,9 +91,14 @@ app.get('/sessions/:id/qr', (req, res) => {
 
 // Send Message (The main endpoint for AI)
 app.post('/messages/send', async (req, res) => {
-    const { sessionId, to, text, replyTo } = req.body;
-    if (!sessionId || !to || !text) {
-        return res.status(400).json({ error: 'Missing required fields' });
+    const { sessionId, to, text, audioUrl, imageUrl, videoUrl, documentUrl, ptt, replyTo, fileName, mimetype } = req.body;
+
+    if (!sessionId || !to) {
+        return res.status(400).json({ error: 'Missing required fields: sessionId and to' });
+    }
+
+    if (!text && !audioUrl && !imageUrl && !videoUrl && !documentUrl) {
+        return res.status(400).json({ error: 'Missing message content: provide text or a media URL' });
     }
 
     try {
@@ -106,7 +112,35 @@ app.post('/messages/send', async (req, res) => {
             options.quoted = { key: { id: replyTo, remoteJid: jid, fromMe: false }, message: { conversation: '...' } };
         }
 
-        const result = await instance.sock.sendMessage(jid, { text }, options);
+        let messageContent: any = {};
+        if (audioUrl) {
+            messageContent = {
+                audio: { url: audioUrl },
+                mimetype: mimetype || 'audio/ogg; codecs=opus',
+                ptt: !!ptt
+            };
+        } else if (imageUrl) {
+            messageContent = { image: { url: imageUrl }, caption: text };
+        } else if (videoUrl) {
+            messageContent = { video: { url: videoUrl }, caption: text };
+        } else if (documentUrl) {
+            messageContent = {
+                document: { url: documentUrl },
+                mimetype: mimetype || 'application/pdf',
+                fileName: fileName || text || 'document'
+            };
+        } else {
+            messageContent = { text };
+        }
+
+        const result = await instance.sock.sendMessage(jid, messageContent, options);
+
+        // Store outbound message in Postgres asynchronously
+        const sentMediaUrl = audioUrl || imageUrl || videoUrl || documentUrl || null;
+        postgresMessageWriter.storeOutboundMessage(sessionId, result!, jid, sentMediaUrl).catch(err => {
+            console.error(`[Postgres] Failed to store outbound message: ${err.message}`);
+        });
+
         res.json({ status: 'sent', result });
     } catch (err: any) {
         res.status(500).json({ error: err.message });

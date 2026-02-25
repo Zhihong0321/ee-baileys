@@ -205,6 +205,83 @@ class PostgresMessageWriter {
         return key || 'unknown';
     }
 
+    /**
+     * Store an outbound WhatsApp message into et_messages.
+     *
+     * @param sessionId      - The Baileys session identifier (maps to et_channel_sessions)
+     * @param msg            - Result from sock.sendMessage
+     * @param recipientJid   - The JID of the contact being sent to
+     * @param mediaUrl       - Optional media URL that was sent
+     */
+    async storeOutboundMessage(sessionId: string, msg: proto.IWebMessageInfo, recipientJid: string, mediaUrl?: string | null): Promise<void> {
+        const pool = this.getPool();
+        if (!pool) return;
+
+        const messageId = msg.key?.id;
+        if (!messageId || !recipientJid) return;
+
+        // 1. Resolve session → tenant_id + channel_session_id
+        const session = await this.resolveSession(pool, sessionId);
+        if (!session) return;
+
+        // 2. Resolve lead (recipient) within tenant by phone digits
+        const leadId = await this.resolveLead(pool, session.tenantId, recipientJid);
+        if (leadId === null) return;
+
+        const messageType = this.resolveMessageType(msg);
+        const textContent = this.resolveTextContent(msg);
+        const resolvedMediaUrl = mediaUrl || null;
+
+        // Recipient phone from JID
+        const recipientPhone = recipientJid.split('@')[0].split(':')[0] || null;
+
+        // Sender phone (this account) - we might not always have this at the moment of sending easily
+        // but we can try to get it from the session info or leave it null.
+        // For simplicity, we'll leave it null for now as the trigger handles thread assignment via lead_id anyway.
+
+        const sql = `
+            INSERT INTO et_messages (
+                tenant_id, lead_id, thread_id, channel_session_id,
+                channel, external_message_id, direction, message_type,
+                text_content, media_url, raw_payload, delivery_status,
+                recipient_phone,
+                created_at, updated_at
+            ) VALUES (
+                $1, $2, NULL, $3,
+                'whatsapp', $4, 'outbound', $5,
+                $6, $7, $8::jsonb, 'sent',
+                $9,
+                NOW(), NOW()
+            )
+            ON CONFLICT (tenant_id, channel, external_message_id)
+            DO NOTHING
+        `;
+
+        try {
+            await pool.query(sql, [
+                session.tenantId,
+                leadId,
+                session.channelSessionId,
+                messageId,
+                messageType,
+                textContent,
+                resolvedMediaUrl,
+                JSON.stringify(msg),
+                recipientPhone,
+            ]);
+            console.log(`[Postgres] Stored outbound message ${messageId}`);
+        } catch (err: any) {
+            console.error(`[Postgres] Failed to store outbound message ${messageId}: ${err.message}`);
+        }
+    }
+
+    private resolveOutboundMediaUrl(msg: proto.IWebMessageInfo): string | null {
+        const message = msg.message;
+        if (!message) return null;
+
+        return null;
+    }
+
     private resolveTextContent(msg: proto.IWebMessageInfo): string | null {
         const message = msg.message;
         if (!message) return null;

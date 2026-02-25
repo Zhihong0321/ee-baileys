@@ -1,11 +1,13 @@
 <!doctype html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Baileys API Documentation</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
+
 <body>
   <main class="page">
     <header class="hero">
@@ -68,9 +70,21 @@
           <p class="muted">Create or initialize a WhatsApp session. Returns connection status and QR when available.</p>
           <h3>Path Params</h3>
           <table class="doc-table">
-            <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Required</th>
+                <th>Description</th>
+              </tr>
+            </thead>
             <tbody>
-              <tr><td><code>id</code></td><td>string</td><td>yes</td><td>Session identifier, example: <code>101:sales-1</code></td></tr>
+              <tr>
+                <td><code>id</code></td>
+                <td>string</td>
+                <td>yes</td>
+                <td>Session identifier, example: <code>101:sales-1</code></td>
+              </tr>
             </tbody>
           </table>
           <h3>Response 200</h3>
@@ -116,19 +130,111 @@
           <p class="muted">Send a WhatsApp message from a connected session.</p>
           <h3>Request Body</h3>
           <table class="doc-table">
-            <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Required</th>
+                <th>Description</th>
+              </tr>
+            </thead>
             <tbody>
-              <tr><td><code>sessionId</code></td><td>string</td><td>yes</td><td>Connected session ID</td></tr>
-              <tr><td><code>to</code></td><td>string</td><td>yes</td><td>Phone number or full JID. If number only, server appends <code>@s.whatsapp.net</code></td></tr>
-              <tr><td><code>text</code></td><td>string</td><td>yes</td><td>Message text</td></tr>
-              <tr><td><code>replyTo</code></td><td>string</td><td>no</td><td>Message ID to quote/reply</td></tr>
+              <tr>
+                <td><code>sessionId</code></td>
+                <td>string</td>
+                <td>yes</td>
+                <td>Connected session ID</td>
+              </tr>
+              <tr>
+                <td><code>to</code></td>
+                <td>string</td>
+                <td>yes</td>
+                <td>Phone number or full JID. If number only, server appends <code>@s.whatsapp.net</code></td>
+              </tr>
+              <tr>
+                <td><code>text</code></td>
+                <td>string</td>
+                <td>no*</td>
+                <td>Message text. Optional if sending media. Used as caption for images/videos.</td>
+              </tr>
+              <tr>
+                <td><code>audioUrl</code></td>
+                <td>string</td>
+                <td>no</td>
+                <td>URL to an audio file. If provided, sends an audio message.</td>
+              </tr>
+              <tr>
+                <td><code>ptt</code></td>
+                <td>boolean</td>
+                <td>no</td>
+                <td>If <code>true</code> and <code>audioUrl</code> is provided, sends as a <b>Voice Note</b>
+                  (Push-to-Talk).</td>
+              </tr>
+              <tr>
+                <td><code>imageUrl</code></td>
+                <td>string</td>
+                <td>no</td>
+                <td>URL to an image. Sends as an image message.</td>
+              </tr>
+              <tr>
+                <td><code>videoUrl</code></td>
+                <td>string</td>
+                <td>no</td>
+                <td>URL to a video. Sends as a video message.</td>
+              </tr>
+              <tr>
+                <td><code>documentUrl</code></td>
+                <td>string</td>
+                <td>no</td>
+                <td>URL to a document (e.g. PDF). Sends as a document message.</td>
+              </tr>
+              <tr>
+                <td><code>fileName</code></td>
+                <td>string</td>
+                <td>no</td>
+                <td>File name for document messages (default: <code>"document"</code> or <code>text</code>).</td>
+              </tr>
+              <tr>
+                <td><code>mimetype</code></td>
+                <td>string</td>
+                <td>no</td>
+                <td>Override default mime type (e.g. <code>"application/pdf"</code> for docs,
+                  <code>"audio/ogg; codecs=opus"</code> for voice).</td>
+              </tr>
+              <tr>
+                <td><code>replyTo</code></td>
+                <td>string</td>
+                <td>no</td>
+                <td>Message ID to quote/reply.</td>
+              </tr>
             </tbody>
           </table>
-          <h3>Request Example</h3>
+          <p class="muted"><i>* At least one of <code>text</code>, <code>audioUrl</code>, <code>imageUrl</code>,
+              <code>videoUrl</code>, or <code>documentUrl</code> is required.</i></p>
+
+          <h3>Examples</h3>
+
+          <h4>Send Text</h4>
           <pre class="code-block"><code>{
   "sessionId": "101:sales-1",
   "to": "14155552671",
   "text": "Hello from Baileys API"
+}</code></pre>
+
+          <h4>Send Voice Note (PTT)</h4>
+          <pre class="code-block"><code>{
+  "sessionId": "101:sales-1",
+  "to": "14155552671",
+  "audioUrl": "https://example.com/voice.ogg",
+  "ptt": true
+}</code></pre>
+
+          <h4>Send Image with Caption</h4>
+          <pre class="code-block"><code>{
+  "sessionId": "101:sales-1",
+  "to": "14155552671",
+  "imageUrl": "https://example.com/photo.jpg",
+  "text": "Check this out!"
 }</code></pre>
           <h3>Response 200</h3>
           <pre class="code-block"><code>{
@@ -153,13 +259,33 @@
 
         <section id="leads-verify">
           <h2><span class="method post">POST</span><span class="endpoint">/leads/verify-whatsapp</span></h2>
-          <p class="muted">Check if a phone number is a WhatsApp user and pre-resolve their LID (Linked ID). Auto-initializes the session if not already in memory. Stores verification status (<code>is_whatsapp_valid</code>, <code>last_verify_at</code>) and LID on the matching lead in <code>et_leads</code>.</p>
+          <p class="muted">Check if a phone number is a WhatsApp user and pre-resolve their LID (Linked ID).
+            Auto-initializes the session if not already in memory. Stores verification status
+            (<code>is_whatsapp_valid</code>, <code>last_verify_at</code>) and LID on the matching lead in
+            <code>et_leads</code>.</p>
           <h3>Request Body</h3>
           <table class="doc-table">
-            <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Required</th>
+                <th>Description</th>
+              </tr>
+            </thead>
             <tbody>
-              <tr><td><code>sessionId</code></td><td>string</td><td>yes</td><td>Session ID — will be auto-restored if not in memory (must be connectable)</td></tr>
-              <tr><td><code>phone</code></td><td>string</td><td>yes</td><td>Phone number (digits only, with country code, e.g. <code>60182970127</code>)</td></tr>
+              <tr>
+                <td><code>sessionId</code></td>
+                <td>string</td>
+                <td>yes</td>
+                <td>Session ID — will be auto-restored if not in memory (must be connectable)</td>
+              </tr>
+              <tr>
+                <td><code>phone</code></td>
+                <td>string</td>
+                <td>yes</td>
+                <td>Phone number (digits only, with country code, e.g. <code>60182970127</code>)</td>
+              </tr>
             </tbody>
           </table>
           <h3>Request Example</h3>
@@ -193,23 +319,71 @@
 }</code></pre>
           <h3>Response Fields</h3>
           <table class="doc-table">
-            <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Description</th>
+              </tr>
+            </thead>
             <tbody>
-              <tr><td><code>phone</code></td><td>string</td><td>Normalized phone digits</td></tr>
-              <tr><td><code>isWhatsApp</code></td><td>boolean</td><td>Whether the number is registered on WhatsApp</td></tr>
-              <tr><td><code>lid</code></td><td>string | null</td><td>Resolved LID JID (e.g. <code>157535172559093@lid</code>), or null if not yet available</td></tr>
-              <tr><td><code>leadUpdated</code></td><td>boolean</td><td>Whether the lead record in <code>et_leads</code> was updated</td></tr>
-              <tr><td><code>verifyError</code></td><td>string | null</td><td>Error message if the WhatsApp check itself failed (e.g. stream error)</td></tr>
+              <tr>
+                <td><code>phone</code></td>
+                <td>string</td>
+                <td>Normalized phone digits</td>
+              </tr>
+              <tr>
+                <td><code>isWhatsApp</code></td>
+                <td>boolean</td>
+                <td>Whether the number is registered on WhatsApp</td>
+              </tr>
+              <tr>
+                <td><code>lid</code></td>
+                <td>string | null</td>
+                <td>Resolved LID JID (e.g. <code>157535172559093@lid</code>), or null if not yet available</td>
+              </tr>
+              <tr>
+                <td><code>leadUpdated</code></td>
+                <td>boolean</td>
+                <td>Whether the lead record in <code>et_leads</code> was updated</td>
+              </tr>
+              <tr>
+                <td><code>verifyError</code></td>
+                <td>string | null</td>
+                <td>Error message if the WhatsApp check itself failed (e.g. stream error)</td>
+              </tr>
             </tbody>
           </table>
           <h3>DB Columns Updated on <code>et_leads</code></h3>
           <table class="doc-table">
-            <thead><tr><th>Column</th><th>Type</th><th>Description</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Column</th>
+                <th>Type</th>
+                <th>Description</th>
+              </tr>
+            </thead>
             <tbody>
-              <tr><td><code>whatsapp_lid</code></td><td>VARCHAR(255)</td><td>LID JID (only set when resolved, preserved across re-verifications)</td></tr>
-              <tr><td><code>is_whatsapp_valid</code></td><td>BOOLEAN</td><td><code>true</code> if number exists on WhatsApp, <code>false</code> otherwise</td></tr>
-              <tr><td><code>last_verify_at</code></td><td>TIMESTAMPTZ</td><td>When the verification was last performed</td></tr>
-              <tr><td><code>verify_error</code></td><td>TEXT</td><td>Error message if verification failed, null on success</td></tr>
+              <tr>
+                <td><code>whatsapp_lid</code></td>
+                <td>VARCHAR(255)</td>
+                <td>LID JID (only set when resolved, preserved across re-verifications)</td>
+              </tr>
+              <tr>
+                <td><code>is_whatsapp_valid</code></td>
+                <td>BOOLEAN</td>
+                <td><code>true</code> if number exists on WhatsApp, <code>false</code> otherwise</td>
+              </tr>
+              <tr>
+                <td><code>last_verify_at</code></td>
+                <td>TIMESTAMPTZ</td>
+                <td>When the verification was last performed</td>
+              </tr>
+              <tr>
+                <td><code>verify_error</code></td>
+                <td>TEXT</td>
+                <td>Error message if verification failed, null on success</td>
+              </tr>
             </tbody>
           </table>
           <h3>cURL Example</h3>
@@ -223,13 +397,31 @@
 
         <section id="chats-list">
           <h2><span class="method get">GET</span><span class="endpoint">/chats</span></h2>
-          <p class="muted">List conversation threads from session cache/history sync. Sorted by most recent message first.</p>
+          <p class="muted">List conversation threads from session cache/history sync. Sorted by most recent message
+            first.</p>
           <h3>Query Params</h3>
           <table class="doc-table">
-            <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Required</th>
+                <th>Description</th>
+              </tr>
+            </thead>
             <tbody>
-              <tr><td><code>sessionId</code></td><td>string</td><td>yes</td><td>Connected session ID</td></tr>
-              <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max chats returned (default 100, max 500)</td></tr>
+              <tr>
+                <td><code>sessionId</code></td>
+                <td>string</td>
+                <td>yes</td>
+                <td>Connected session ID</td>
+              </tr>
+              <tr>
+                <td><code>limit</code></td>
+                <td>number</td>
+                <td>no</td>
+                <td>Max chats returned (default 100, max 500)</td>
+              </tr>
             </tbody>
           </table>
           <h3>Response 200</h3>
@@ -261,14 +453,47 @@
 }</code></pre>
           <h3>Response Fields</h3>
           <table class="doc-table">
-            <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Description</th>
+              </tr>
+            </thead>
             <tbody>
-              <tr><td><code>id</code></td><td>string</td><td>WhatsApp JID — either <code>@s.whatsapp.net</code> (phone) or <code>@lid</code> (anonymous) or <code>@g.us</code> (group)</td></tr>
-              <tr><td><code>phoneNumber</code></td><td>string | null</td><td>Extracted phone digits (e.g. <code>"60123456789"</code>). <code>null</code> for LID contacts or groups — WhatsApp's new privacy architecture does not expose phone numbers in bulk history sync for these contacts.</td></tr>
-              <tr><td><code>name</code></td><td>string | null</td><td>Contact name from your phone book, or <code>null</code> if not in contacts</td></tr>
-              <tr><td><code>unreadCount</code></td><td>number</td><td>Unread message count</td></tr>
-              <tr><td><code>isGroup</code></td><td>boolean</td><td>Whether this is a group chat</td></tr>
-              <tr><td><code>lastMessageTimestamp</code></td><td>number (ms) | null</td><td>Unix timestamp (milliseconds) of last message</td></tr>
+              <tr>
+                <td><code>id</code></td>
+                <td>string</td>
+                <td>WhatsApp JID — either <code>@s.whatsapp.net</code> (phone) or <code>@lid</code> (anonymous) or
+                  <code>@g.us</code> (group)</td>
+              </tr>
+              <tr>
+                <td><code>phoneNumber</code></td>
+                <td>string | null</td>
+                <td>Extracted phone digits (e.g. <code>"60123456789"</code>). <code>null</code> for LID contacts or
+                  groups — WhatsApp's new privacy architecture does not expose phone numbers in bulk history sync for
+                  these contacts.</td>
+              </tr>
+              <tr>
+                <td><code>name</code></td>
+                <td>string | null</td>
+                <td>Contact name from your phone book, or <code>null</code> if not in contacts</td>
+              </tr>
+              <tr>
+                <td><code>unreadCount</code></td>
+                <td>number</td>
+                <td>Unread message count</td>
+              </tr>
+              <tr>
+                <td><code>isGroup</code></td>
+                <td>boolean</td>
+                <td>Whether this is a group chat</td>
+              </tr>
+              <tr>
+                <td><code>lastMessageTimestamp</code></td>
+                <td>number (ms) | null</td>
+                <td>Unix timestamp (milliseconds) of last message</td>
+              </tr>
             </tbody>
           </table>
           <h3>cURL Example</h3>
@@ -277,21 +502,57 @@
 
         <section id="chats-messages">
           <h2><span class="method get">GET</span><span class="endpoint">/chats/:jid/messages</span></h2>
-          <p class="muted">Read messages for one chat JID from the in-memory session cache/history sync. Messages are returned oldest-first. Use <code>id</code> from <code>GET /chats</code> as the <code>:jid</code> path parameter.</p>
+          <p class="muted">Read messages for one chat JID from the in-memory session cache/history sync. Messages are
+            returned oldest-first. Use <code>id</code> from <code>GET /chats</code> as the <code>:jid</code> path
+            parameter.</p>
           <h3>Path Params</h3>
           <table class="doc-table">
-            <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Required</th>
+                <th>Description</th>
+              </tr>
+            </thead>
             <tbody>
-              <tr><td><code>jid</code></td><td>string</td><td>yes</td><td>Chat JID from <code>GET /chats</code> — URL-encode the <code>@</code> as <code>%40</code></td></tr>
+              <tr>
+                <td><code>jid</code></td>
+                <td>string</td>
+                <td>yes</td>
+                <td>Chat JID from <code>GET /chats</code> — URL-encode the <code>@</code> as <code>%40</code></td>
+              </tr>
             </tbody>
           </table>
           <h3>Query Params</h3>
           <table class="doc-table">
-            <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Required</th>
+                <th>Description</th>
+              </tr>
+            </thead>
             <tbody>
-              <tr><td><code>sessionId</code></td><td>string</td><td>yes</td><td>Connected session ID</td></tr>
-              <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max messages returned (default 50, max 500)</td></tr>
-              <tr><td><code>beforeTimestamp</code></td><td>number (ms)</td><td>no</td><td>Return messages older than this Unix timestamp (ms) — use for pagination</td></tr>
+              <tr>
+                <td><code>sessionId</code></td>
+                <td>string</td>
+                <td>yes</td>
+                <td>Connected session ID</td>
+              </tr>
+              <tr>
+                <td><code>limit</code></td>
+                <td>number</td>
+                <td>no</td>
+                <td>Max messages returned (default 50, max 500)</td>
+              </tr>
+              <tr>
+                <td><code>beforeTimestamp</code></td>
+                <td>number (ms)</td>
+                <td>no</td>
+                <td>Return messages older than this Unix timestamp (ms) — use for pagination</td>
+              </tr>
             </tbody>
           </table>
           <h3>Response 200</h3>
@@ -320,18 +581,51 @@
 }</code></pre>
           <h3>Response Fields (per message)</h3>
           <table class="doc-table">
-            <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Description</th>
+              </tr>
+            </thead>
             <tbody>
-              <tr><td><code>id</code></td><td>string | null</td><td>WhatsApp message ID</td></tr>
-              <tr><td><code>phoneNumber</code></td><td>string | null</td><td>Phone number of the contact. <code>null</code> for LID-only contacts</td></tr>
-              <tr><td><code>fromMe</code></td><td>boolean</td><td><code>true</code> = sent by you, <code>false</code> = received from contact</td></tr>
-              <tr><td><code>timestamp</code></td><td>number (ms)</td><td>Message time as Unix timestamp (milliseconds)</td></tr>
-              <tr><td><code>type</code></td><td>string</td><td>Message type: <code>conversation</code>, <code>extendedTextMessage</code>, <code>imageMessage</code>, <code>videoMessage</code>, <code>audioMessage</code>, <code>documentMessage</code>, etc.</td></tr>
-              <tr><td><code>content</code></td><td>string</td><td>Text content — body for text messages, caption for media. Empty string for non-text types.</td></tr>
+              <tr>
+                <td><code>id</code></td>
+                <td>string | null</td>
+                <td>WhatsApp message ID</td>
+              </tr>
+              <tr>
+                <td><code>phoneNumber</code></td>
+                <td>string | null</td>
+                <td>Phone number of the contact. <code>null</code> for LID-only contacts</td>
+              </tr>
+              <tr>
+                <td><code>fromMe</code></td>
+                <td>boolean</td>
+                <td><code>true</code> = sent by you, <code>false</code> = received from contact</td>
+              </tr>
+              <tr>
+                <td><code>timestamp</code></td>
+                <td>number (ms)</td>
+                <td>Message time as Unix timestamp (milliseconds)</td>
+              </tr>
+              <tr>
+                <td><code>type</code></td>
+                <td>string</td>
+                <td>Message type: <code>conversation</code>, <code>extendedTextMessage</code>,
+                  <code>imageMessage</code>, <code>videoMessage</code>, <code>audioMessage</code>,
+                  <code>documentMessage</code>, etc.</td>
+              </tr>
+              <tr>
+                <td><code>content</code></td>
+                <td>string</td>
+                <td>Text content — body for text messages, caption for media. Empty string for non-text types.</td>
+              </tr>
             </tbody>
           </table>
           <h3>cURL Example</h3>
-          <pre class="code-block"><code>curl "https://YOUR-DOMAIN/chats/60123456789%40s.whatsapp.net/messages?sessionId=101:sales-1&limit=50"</code></pre>
+          <pre
+            class="code-block"><code>curl "https://YOUR-DOMAIN/chats/60123456789%40s.whatsapp.net/messages?sessionId=101:sales-1&limit=50"</code></pre>
         </section>
 
         <section id="sessions-delete">
@@ -356,7 +650,8 @@
           <h2>Postgres Message Schema (Inbound Write)</h2>
           <p class="muted">
             On incoming messages, server writes to <code>et_messages</code> when <code>DATABASE_URL</code> is set.
-            Session and tenant are resolved via <code>et_channel_sessions</code> lookup by <code>session_identifier</code>.
+            Session and tenant are resolved via <code>et_channel_sessions</code> lookup by
+            <code>session_identifier</code>.
           </p>
           <p class="muted">
             Note: chat/message read endpoints are backed by in-memory cache and WhatsApp history sync events.
@@ -364,28 +659,70 @@
           </p>
           <h3>Insert Mapping</h3>
           <table class="doc-table">
-            <thead><tr><th>DB Column</th><th>Value Source</th></tr></thead>
+            <thead>
+              <tr>
+                <th>DB Column</th>
+                <th>Value Source</th>
+              </tr>
+            </thead>
             <tbody>
-              <tr><td><code>tenant_id</code></td><td>Looked up from <code>et_channel_sessions</code> by <code>session_identifier</code></td></tr>
-              <tr><td><code>lead_id</code></td><td>Matched from <code>et_leads</code>: first by <code>whatsapp_lid</code>, then by phone digits in <code>external_id</code></td></tr>
-              <tr><td><code>channel_session_id</code></td><td><code>et_channel_sessions.id</code> for the matched session</td></tr>
-              <tr><td><code>channel</code></td><td><code>"whatsapp"</code></td></tr>
-              <tr><td><code>external_message_id</code></td><td>Baileys <code>msg.key.id</code></td></tr>
-              <tr><td><code>direction</code></td><td><code>"inbound"</code></td></tr>
-              <tr><td><code>message_type</code></td><td>Derived: text/image/video/audio/document/sticker/reaction/unknown</td></tr>
-              <tr><td><code>text_content</code></td><td>conversation/ext text/caption where available</td></tr>
-              <tr><td><code>media_url</code></td><td><code>null</code> (current)</td></tr>
-              <tr><td><code>raw_payload</code></td><td>Full Baileys message JSON (jsonb)</td></tr>
-              <tr><td><code>delivery_status</code></td><td><code>"received"</code></td></tr>
+              <tr>
+                <td><code>tenant_id</code></td>
+                <td>Looked up from <code>et_channel_sessions</code> by <code>session_identifier</code></td>
+              </tr>
+              <tr>
+                <td><code>lead_id</code></td>
+                <td>Matched from <code>et_leads</code>: first by <code>whatsapp_lid</code>, then by phone digits in
+                  <code>external_id</code></td>
+              </tr>
+              <tr>
+                <td><code>channel_session_id</code></td>
+                <td><code>et_channel_sessions.id</code> for the matched session</td>
+              </tr>
+              <tr>
+                <td><code>channel</code></td>
+                <td><code>"whatsapp"</code></td>
+              </tr>
+              <tr>
+                <td><code>external_message_id</code></td>
+                <td>Baileys <code>msg.key.id</code></td>
+              </tr>
+              <tr>
+                <td><code>direction</code></td>
+                <td><code>"inbound"</code></td>
+              </tr>
+              <tr>
+                <td><code>message_type</code></td>
+                <td>Derived: text/image/video/audio/document/sticker/reaction/unknown</td>
+              </tr>
+              <tr>
+                <td><code>text_content</code></td>
+                <td>conversation/ext text/caption where available</td>
+              </tr>
+              <tr>
+                <td><code>media_url</code></td>
+                <td><code>null</code> (current)</td>
+              </tr>
+              <tr>
+                <td><code>raw_payload</code></td>
+                <td>Full Baileys message JSON (jsonb)</td>
+              </tr>
+              <tr>
+                <td><code>delivery_status</code></td>
+                <td><code>"received"</code></td>
+              </tr>
             </tbody>
           </table>
           <h3>Lead Resolution</h3>
           <p class="muted">
-            Leads are matched in order: (1) by <code>whatsapp_lid</code> if the sender is an <code>@lid</code> JID — fast direct lookup for pre-verified leads,
-            (2) by phone digits extracted from <code>external_id</code> — fallback for leads not yet verified via <code>POST /leads/verify-whatsapp</code>.
+            Leads are matched in order: (1) by <code>whatsapp_lid</code> if the sender is an <code>@lid</code> JID —
+            fast direct lookup for pre-verified leads,
+            (2) by phone digits extracted from <code>external_id</code> — fallback for leads not yet verified via
+            <code>POST /leads/verify-whatsapp</code>.
           </p>
           <h3>Idempotency</h3>
-          <p class="muted">Uses DB conflict handling on unique key <code>(tenant_id, channel, external_message_id)</code>.</p>
+          <p class="muted">Uses DB conflict handling on unique key
+            <code>(tenant_id, channel, external_message_id)</code>.</p>
         </section>
 
         <section id="errors">
@@ -396,11 +733,29 @@
 }</code></pre>
           <h3>Common Cases</h3>
           <table class="doc-table">
-            <thead><tr><th>Status</th><th>Case</th><th>Example</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Case</th>
+                <th>Example</th>
+              </tr>
+            </thead>
             <tbody>
-              <tr><td>400</td><td>Invalid request body</td><td><code>{"error":"Missing required fields"}</code></td></tr>
-              <tr><td>404</td><td>QR unavailable</td><td><code>{"error":"QR not ready or already connected"}</code></td></tr>
-              <tr><td>500</td><td>Internal/server error</td><td><code>{"error":"Socket not initialized"}</code></td></tr>
+              <tr>
+                <td>400</td>
+                <td>Invalid request body</td>
+                <td><code>{"error":"Missing required fields"}</code></td>
+              </tr>
+              <tr>
+                <td>404</td>
+                <td>QR unavailable</td>
+                <td><code>{"error":"QR not ready or already connected"}</code></td>
+              </tr>
+              <tr>
+                <td>500</td>
+                <td>Internal/server error</td>
+                <td><code>{"error":"Socket not initialized"}</code></td>
+              </tr>
             </tbody>
           </table>
         </section>
@@ -408,4 +763,5 @@
     </section>
   </main>
 </body>
+
 </html>
