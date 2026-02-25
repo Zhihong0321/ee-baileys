@@ -187,7 +187,10 @@ export class WhatsAppInstance {
                     // Download and decrypt supported media (voice, image, PDF) and return HTTP URL
                     const mediaUrl = await this.persistSupportedInboundMedia(msg);
 
-                    await postgresMessageWriter.storeInboundMessage(this.sessionId, msg, senderJid, mediaUrl);
+                    // Recipient = this logged-in WA account's phone number
+                    const recipientPhone = this.extractPhoneNumber(this.sock?.user?.id ?? '');
+
+                    await postgresMessageWriter.storeInboundMessage(this.sessionId, msg, senderJid, mediaUrl, recipientPhone);
 
                     dispatchWebhook({
                         sessionId: this.sessionId,

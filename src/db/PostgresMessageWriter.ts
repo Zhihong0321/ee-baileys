@@ -102,12 +102,13 @@ class PostgresMessageWriter {
     /**
      * Store an inbound WhatsApp message into et_messages.
      *
-     * @param sessionId   - The Baileys session identifier (maps to et_channel_sessions)
-     * @param msg         - Raw Baileys message object
-     * @param senderJid   - Always a phone-number JID (@s.whatsapp.net), resolved by Instance.ts
-     * @param mediaUrl    - HTTP URL for downloaded/decrypted inbound media (if any)
+     * @param sessionId      - The Baileys session identifier (maps to et_channel_sessions)
+     * @param msg            - Raw Baileys message object
+     * @param senderJid      - Always a phone-number JID (@s.whatsapp.net), resolved by Instance.ts
+     * @param mediaUrl       - HTTP URL for downloaded/decrypted inbound media (if any)
+     * @param recipientPhone - Plain phone number of the logged-in WA account (sock.user.id digits)
      */
-    async storeInboundMessage(sessionId: string, msg: proto.IWebMessageInfo, senderJid: string, mediaUrl?: string | null): Promise<void> {
+    async storeInboundMessage(sessionId: string, msg: proto.IWebMessageInfo, senderJid: string, mediaUrl?: string | null, recipientPhone?: string | null): Promise<void> {
         const pool = this.getPool();
         if (!pool) return;
 
@@ -141,22 +142,30 @@ class PostgresMessageWriter {
         const textContent = this.resolveTextContent(msg);
         const resolvedMediaUrl = mediaUrl ?? null;
 
+        // Extract plain sender phone number from JID: "60182970127:0@s.whatsapp.net" → "60182970127"
+        const senderPhone = senderJid.split('@')[0].split(':')[0] || null;
+        const resolvedRecipientPhone = recipientPhone ?? null;
+
         // 3. Upsert into et_messages (thread_id assigned automatically by DB trigger)
         const sql = `
             INSERT INTO et_messages (
                 tenant_id, lead_id, thread_id, channel_session_id,
                 channel, external_message_id, direction, message_type,
                 text_content, media_url, raw_payload, delivery_status,
+                sender_phone, recipient_phone,
                 created_at, updated_at
             ) VALUES (
                 $1, $2, NULL, $3,
                 'whatsapp', $4, 'inbound', $5,
                 $6, $7, $8::jsonb, 'received',
+                $9, $10,
                 NOW(), NOW()
             )
             ON CONFLICT (tenant_id, channel, external_message_id)
             DO UPDATE SET
                 raw_payload = EXCLUDED.raw_payload,
+                sender_phone = EXCLUDED.sender_phone,
+                recipient_phone = EXCLUDED.recipient_phone,
                 updated_at = NOW()
         `;
 
@@ -170,6 +179,8 @@ class PostgresMessageWriter {
                 textContent,
                 resolvedMediaUrl,
                 JSON.stringify(msg),
+                senderPhone,
+                resolvedRecipientPhone,
             ]);
 
             console.log(`[Postgres] Stored inbound message ${messageId} (tenant=${session.tenantId}, lead=${leadId}, session=${session.channelSessionId})`);
