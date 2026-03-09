@@ -29,6 +29,7 @@
         <a href="#sessions-list">GET /sessions</a>
         <a href="#sessions-qr">GET /sessions/:id/qr</a>
         <a href="#messages-send">POST /messages/send</a>
+        <a href="#groups-create">POST /groups/create</a>
         <a href="#leads-verify">POST /leads/verify-whatsapp</a>
         <a href="#chats-list">GET /chats</a>
         <a href="#chats-messages">GET /chats/:jid/messages</a>
@@ -56,6 +57,7 @@
             <li><code>GET /sessions</code></li>
             <li><code>GET /sessions/:id/qr</code></li>
             <li><code>POST /messages/send</code></li>
+            <li><code>POST /groups/create</code></li>
             <li><code>POST /leads/verify-whatsapp</code></li>
             <li><code>GET /chats?sessionId=...&amp;limit=100</code></li>
             <li><code>GET /chats/:jid/messages?sessionId=...&amp;limit=50&amp;beforeTimestamp=...</code></li>
@@ -199,7 +201,8 @@
                 <td>string</td>
                 <td>no</td>
                 <td>Override default mime type (e.g. <code>"application/pdf"</code> for docs,
-                  <code>"audio/ogg; codecs=opus"</code> for voice).</td>
+                  <code>"audio/ogg; codecs=opus"</code> for voice).
+                </td>
               </tr>
               <tr>
                 <td><code>replyTo</code></td>
@@ -257,12 +260,76 @@
   }'</code></pre>
         </section>
 
+        <section id="groups-create">
+          <h2><span class="method post">POST</span><span class="endpoint">/groups/create</span></h2>
+          <p class="muted">Create a new WhatsApp group with the connected session.</p>
+          <h3>Request Body</h3>
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Required</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>sessionId</code></td>
+                <td>string</td>
+                <td>yes</td>
+                <td>Connected session ID</td>
+              </tr>
+              <tr>
+                <td><code>subject</code></td>
+                <td>string</td>
+                <td>yes</td>
+                <td>The name/subject of the new group</td>
+              </tr>
+              <tr>
+                <td><code>participants</code></td>
+                <td>array of strings</td>
+                <td>yes</td>
+                <td>Array of phone numbers to invite to the group. Server appends <code>@s.whatsapp.net</code> if
+                  missing.</td>
+              </tr>
+            </tbody>
+          </table>
+          <h3>Example Request</h3>
+          <pre class="code-block"><code>{
+  "sessionId": "101:sales-1",
+  "subject": "My Test Group",
+  "participants": [
+    "14155552671",
+    "1234567890"
+  ]
+}</code></pre>
+          <h3>Response 200</h3>
+          <pre class="code-block"><code>{
+  "status": "created",
+  "group": {
+    "id": "1234567890-7890@g.us",
+    "subject": "My Test Group",
+    "participants": [...]
+  }
+}</code></pre>
+          <h3>cURL Example</h3>
+          <pre class="code-block"><code>curl -X POST "https://YOUR-DOMAIN/groups/create" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sessionId":"101:sales-1",
+    "subject":"My Test Group",
+    "participants":["14155552671"]
+  }'</code></pre>
+        </section>
+
         <section id="leads-verify">
           <h2><span class="method post">POST</span><span class="endpoint">/leads/verify-whatsapp</span></h2>
           <p class="muted">Check if a phone number is a WhatsApp user and pre-resolve their LID (Linked ID).
             Auto-initializes the session if not already in memory. Stores verification status
             (<code>is_whatsapp_valid</code>, <code>last_verify_at</code>) and LID on the matching lead in
-            <code>et_leads</code>.</p>
+            <code>et_leads</code>.
+          </p>
           <h3>Request Body</h3>
           <table class="doc-table">
             <thead>
@@ -465,7 +532,8 @@
                 <td><code>id</code></td>
                 <td>string</td>
                 <td>WhatsApp JID — either <code>@s.whatsapp.net</code> (phone) or <code>@lid</code> (anonymous) or
-                  <code>@g.us</code> (group)</td>
+                  <code>@g.us</code> (group)
+                </td>
               </tr>
               <tr>
                 <td><code>phoneNumber</code></td>
@@ -614,7 +682,8 @@
                 <td>string</td>
                 <td>Message type: <code>conversation</code>, <code>extendedTextMessage</code>,
                   <code>imageMessage</code>, <code>videoMessage</code>, <code>audioMessage</code>,
-                  <code>documentMessage</code>, etc.</td>
+                  <code>documentMessage</code>, etc.
+                </td>
               </tr>
               <tr>
                 <td><code>content</code></td>
@@ -673,7 +742,8 @@
               <tr>
                 <td><code>lead_id</code></td>
                 <td>Matched from <code>et_leads</code>: first by <code>whatsapp_lid</code>, then by phone digits in
-                  <code>external_id</code></td>
+                  <code>external_id</code>
+                </td>
               </tr>
               <tr>
                 <td><code>channel_session_id</code></td>
@@ -722,7 +792,8 @@
           </p>
           <h3>Idempotency</h3>
           <p class="muted">Uses DB conflict handling on unique key
-            <code>(tenant_id, channel, external_message_id)</code>.</p>
+            <code>(tenant_id, channel, external_message_id)</code>.
+          </p>
         </section>
 
         <section id="errors">
