@@ -26,6 +26,7 @@ app.get('/api', (req, res) => {
             'GET /sessions',
             'GET /sessions/:id/qr',
             'POST /messages/send',
+            'POST /groups/create',
             'GET /chats?sessionId=...',
             'GET /chats/:jid/messages?sessionId=...&limit=50&beforeTimestamp=...',
             'DELETE /sessions/:id'
@@ -173,6 +174,35 @@ app.post('/messages/send', async (req, res) => {
 
         res.json({ status: 'sent', result });
     } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/groups/create', async (req, res) => {
+    const { sessionId, subject, participants } = req.body;
+
+    if (!sessionId || !subject || !participants || !Array.isArray(participants)) {
+        return res.status(400).json({ error: 'Missing or invalid parameters. Required: sessionId, subject, participants (array of strings)' });
+    }
+
+    try {
+        const instance = await manager.getInstance(sessionId);
+        if (!instance.sock?.user) {
+            return res.status(400).json({ error: 'Session not connected' });
+        }
+
+        // Format participants to ensure they are full JIDs if they are just raw numbers
+        const jids = participants.map(p => {
+            const str = String(p).trim();
+            return str.includes('@s.whatsapp.net') ? str : `${str}@s.whatsapp.net`;
+        });
+
+        console.log(`[${sessionId}] Creating group "${subject}" with ${jids.length} participants`);
+        const group = await instance.sock.groupCreate(subject, jids);
+
+        res.json({ status: 'created', group });
+    } catch (err: any) {
+        console.error(`[${sessionId}] Failed to create group:`, err);
         res.status(500).json({ error: err.message });
     }
 });
