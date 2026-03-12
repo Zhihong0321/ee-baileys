@@ -4,6 +4,7 @@ import axios from 'axios';
 import { manager } from '../whatsapp/SocketManager';
 import QRCode from 'qrcode';
 import { postgresMessageWriter } from '../db/PostgresMessageWriter';
+import { WhatsAppInstance } from '../whatsapp/Instance';
 
 const app = express();
 app.use(express.json());
@@ -24,6 +25,7 @@ app.get('/api', (req, res) => {
         endpoints: [
             'POST /sessions/:id',
             'GET /sessions',
+            'GET /sessions/:id',
             'GET /sessions/:id/qr',
             'POST /messages/send',
             'POST /groups/create',
@@ -38,38 +40,75 @@ app.get('/health', (req, res) => {
     res.json({ status: 'ok' });
 });
 
+const buildSessionResponse = async (sessionId: string, instance: WhatsAppInstance) => {
+    const qr = instance.getQRCode();
+    const isConnected = !!instance.sock?.user;
+    const me = instance.getMe();
+
+    let qrImage = null;
+    if (qr) {
+        try {
+            qrImage = await QRCode.toDataURL(qr);
+        } catch (err) {
+            console.error('Error generating QR DataURL:', err);
+        }
+    }
+
+    return {
+        sessionId,
+        status: isConnected ? 'connected' : 'initializing',
+        qr: qr || null,
+        qrImage,
+        error: instance.lastError || null,
+        message: qr ? 'Scan code' : (isConnected ? 'Connected' : (instance.lastError ? 'Error occurred' : 'Waiting for connection update')),
+        connectedNumber: instance.getConnectedNumber(),
+        me,
+    };
+};
+
 // Init or Get status
 app.post('/sessions/:id', async (req, res) => {
     try {
         const instance = await manager.getInstance(req.params.id);
-        const qr = instance.getQRCode();
-        const isConnected = !!instance.sock?.user;
-
-        let qrImage = null;
-        if (qr) {
-            try {
-                qrImage = await QRCode.toDataURL(qr);
-            } catch (err) {
-                console.error('Error generating QR DataURL:', err);
-            }
-        }
-
-        res.json({
-            sessionId: req.params.id,
-            status: isConnected ? 'connected' : 'initializing',
-            qr: qr || null,
-            qrImage: qrImage,
-            error: instance.lastError || null,
-            message: qr ? 'Scan code' : (isConnected ? 'Connected' : (instance.lastError ? 'Error occurred' : 'Waiting for connection update'))
-        });
+        res.json(await buildSessionResponse(req.params.id, instance));
     } catch (err: any) {
         res.status(500).json({ error: err.message });
     }
 });
 
 // List
-app.get('/sessions', (req, res) => {
-    res.json({ sessions: manager.listInstances() });
+app.get('/sessions', async (req, res) => {
+    try {
+        const sessions = manager.listInstances();
+        const sessionDetails = await Promise.all(
+            sessions.map(async (sessionId) => {
+                const instance = manager.getExistingInstance(sessionId);
+                if (!instance) return null;
+                return buildSessionResponse(sessionId, instance);
+            })
+        );
+
+        res.json({
+            sessions,
+            sessionDetails: sessionDetails.filter((session): session is NonNullable<typeof session> => !!session),
+        });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Get a single session status without reinitializing it
+app.get('/sessions/:id', async (req, res) => {
+    try {
+        const instance = manager.getExistingInstance(req.params.id);
+        if (!instance) {
+            return res.status(404).json({ error: 'Session not found' });
+        }
+
+        res.json(await buildSessionResponse(req.params.id, instance));
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // Get QR for a session

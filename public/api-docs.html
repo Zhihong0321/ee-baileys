@@ -27,6 +27,7 @@
         <a href="#overview">Overview</a>
         <a href="#sessions-init">POST /sessions/:id</a>
         <a href="#sessions-list">GET /sessions</a>
+        <a href="#sessions-get">GET /sessions/:id</a>
         <a href="#sessions-qr">GET /sessions/:id/qr</a>
         <a href="#messages-send">POST /messages/send</a>
         <a href="#groups-create">POST /groups/create</a>
@@ -55,6 +56,7 @@
           <ul>
             <li><code>POST /sessions/:id</code></li>
             <li><code>GET /sessions</code></li>
+            <li><code>GET /sessions/:id</code></li>
             <li><code>GET /sessions/:id/qr</code></li>
             <li><code>POST /messages/send</code></li>
             <li><code>POST /groups/create</code></li>
@@ -69,7 +71,7 @@
 
         <section id="sessions-init">
           <h2><span class="method post">POST</span><span class="endpoint">/sessions/:id</span></h2>
-          <p class="muted">Create or initialize a WhatsApp session. Returns connection status and QR when available.</p>
+          <p class="muted">Create or initialize a WhatsApp session. Returns connection status, QR when available, and the linked WhatsApp number once connected.</p>
           <h3>Path Params</h3>
           <table class="doc-table">
             <thead>
@@ -92,25 +94,100 @@
           <h3>Response 200</h3>
           <pre class="code-block"><code>{
   "sessionId": "101:sales-1",
-  "status": "initializing",
-  "qr": "2@ABCDEF...",
-  "qrImage": "data:image/png;base64,...",
+  "status": "connected",
+  "qr": null,
+  "qrImage": null,
   "error": null,
-  "message": "Scan code"
+  "message": "Connected",
+  "connectedNumber": "601121000099",
+  "me": {
+    "id": "601121000099@s.whatsapp.net",
+    "phone": "601121000099"
+  }
 }</code></pre>
+          <p class="muted"><code>connectedNumber</code> is the canonical field for the linked WhatsApp number. Use <code>me.phone</code> or <code>me.id</code> only as fallbacks if needed.</p>
           <h3>cURL Example</h3>
           <pre class="code-block"><code>curl -X POST "https://YOUR-DOMAIN/sessions/101:sales-1"</code></pre>
         </section>
 
         <section id="sessions-list">
           <h2><span class="method get">GET</span><span class="endpoint">/sessions</span></h2>
-          <p class="muted">List active in-memory session IDs in this server process.</p>
+          <p class="muted">List active in-memory session IDs in this server process. The legacy <code>sessions</code> array is preserved, and <code>sessionDetails</code> adds the rich per-session status payload for UI use.</p>
           <h3>Response 200</h3>
           <pre class="code-block"><code>{
-  "sessions": ["101:sales-1", "101:support-1"]
+  "sessions": ["101:sales-1", "101:support-1"],
+  "sessionDetails": [
+    {
+      "sessionId": "101:sales-1",
+      "status": "connected",
+      "qr": null,
+      "qrImage": null,
+      "error": null,
+      "message": "Connected",
+      "connectedNumber": "601121000099",
+      "me": {
+        "id": "601121000099@s.whatsapp.net",
+        "phone": "601121000099"
+      }
+    },
+    {
+      "sessionId": "101:support-1",
+      "status": "initializing",
+      "qr": "2@ABCDEF...",
+      "qrImage": "data:image/png;base64,...",
+      "error": null,
+      "message": "Scan code",
+      "connectedNumber": null,
+      "me": null
+    }
+  ]
 }</code></pre>
           <h3>cURL Example</h3>
           <pre class="code-block"><code>curl "https://YOUR-DOMAIN/sessions"</code></pre>
+        </section>
+
+        <section id="sessions-get">
+          <h2><span class="method get">GET</span><span class="endpoint">/sessions/:id</span></h2>
+          <p class="muted">Get the current status for a single existing session without reinitializing it.</p>
+          <h3>Path Params</h3>
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Required</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>id</code></td>
+                <td>string</td>
+                <td>yes</td>
+                <td>Existing session identifier, example: <code>101:sales-1</code></td>
+              </tr>
+            </tbody>
+          </table>
+          <h3>Response 200</h3>
+          <pre class="code-block"><code>{
+  "sessionId": "101:sales-1",
+  "status": "connected",
+  "qr": null,
+  "qrImage": null,
+  "error": null,
+  "message": "Connected",
+  "connectedNumber": "601121000099",
+  "me": {
+    "id": "601121000099@s.whatsapp.net",
+    "phone": "601121000099"
+  }
+}</code></pre>
+          <h3>Response 404</h3>
+          <pre class="code-block"><code>{
+  "error": "Session not found"
+}</code></pre>
+          <h3>cURL Example</h3>
+          <pre class="code-block"><code>curl "https://YOUR-DOMAIN/sessions/101:sales-1"</code></pre>
         </section>
 
         <section id="sessions-qr">

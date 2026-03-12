@@ -212,6 +212,20 @@ export class WhatsAppInstance {
         return this.qr;
     }
 
+    getMe(): { id: string; phone: string | null } | null {
+        const id = this.sock?.user?.id;
+        if (!id) return null;
+
+        return {
+            id,
+            phone: this.extractPhoneNumber(id),
+        };
+    }
+
+    getConnectedNumber(): string | null {
+        return this.getMe()?.phone || null;
+    }
+
     async logout() {
         if (this.sock) {
             await this.sock.logout();
