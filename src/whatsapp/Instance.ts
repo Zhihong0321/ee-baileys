@@ -184,13 +184,17 @@ export class WhatsAppInstance {
 
                     console.log(`[${this.sessionId}] New message from ${msg.pushName || senderJid} (jid=${senderJid})`);
 
-                    // Download and decrypt supported media (voice, image, PDF) and return HTTP URL
-                    const mediaUrl = await this.persistSupportedInboundMedia(msg);
-
                     // Recipient = this logged-in WA account's phone number
                     const recipientPhone = this.extractPhoneNumber(this.sock?.user?.id ?? '');
 
-                    await postgresMessageWriter.storeInboundMessage(this.sessionId, msg, senderJid, mediaUrl, recipientPhone);
+                    // Durable queue first: store the raw inbound payload before any media work.
+                    await postgresMessageWriter.storeInboundMessage(this.sessionId, msg, senderJid, null, recipientPhone);
+
+                    // Download and attach supported media after the message is already durable.
+                    const mediaUrl = await this.persistSupportedInboundMedia(msg);
+                    if (mediaUrl && msg.key?.id) {
+                        await postgresMessageWriter.attachInboundMedia(this.sessionId, msg.key.id, mediaUrl);
+                    }
 
                     dispatchWebhook({
                         sessionId: this.sessionId,
