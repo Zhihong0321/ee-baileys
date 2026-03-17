@@ -12,6 +12,14 @@ const msgTextEl = document.getElementById('msgText');
 const sendMessageBtn = document.getElementById('sendMessage');
 const messageLog = document.getElementById('messageLog');
 
+const simSessionIdEl = document.getElementById('simSessionId');
+const simRecipientPhoneEl = document.getElementById('simRecipientPhone');
+const simSenderPhoneEl = document.getElementById('simSenderPhone');
+const simPushNameEl = document.getElementById('simPushName');
+const simTextEl = document.getElementById('simText');
+const simulateInboundBtn = document.getElementById('simulateInbound');
+const simulationLog = document.getElementById('simulationLog');
+
 const refreshSessionsBtn = document.getElementById('refreshSessions');
 const sessionList = document.getElementById('sessionList');
 
@@ -142,25 +150,84 @@ async function sendMessage() {
   }
 }
 
+function prettySimulationResult(data) {
+  const summary = {
+    status: data.status,
+    sessionId: data.sessionId,
+    recipientPhone: data.recipientPhone,
+    senderPhone: data.senderPhone,
+    messageId: data.messageId,
+    inboxStatus: data.inbox?.process_status || null,
+    inboxAttempts: data.inbox?.process_attempts || 0,
+    leadId: data.message?.lead_id || null,
+    threadId: data.message?.thread_id || null,
+    triggerWorked: !!data.triggerWorked,
+    lastError: data.inbox?.last_error || null
+  };
+
+  return JSON.stringify({
+    summary,
+    inbox: data.inbox || null,
+    message: data.message || null
+  }, null, 2);
+}
+
+async function simulateInbound() {
+  const sessionId = simSessionIdEl.value.trim();
+  const recipientPhone = simRecipientPhoneEl.value.trim();
+  const senderPhone = simSenderPhoneEl.value.trim();
+  const pushName = simPushNameEl.value.trim();
+  const text = simTextEl.value.trim();
+
+  if (!senderPhone) return alert('Fill sender phone');
+  if (!sessionId && !recipientPhone) return alert('Fill session ID or recipient WhatsApp number');
+
+  simulationLog.textContent = 'Simulating inbound message...';
+  try {
+    const payload = { senderPhone };
+    if (sessionId) payload.sessionId = sessionId;
+    if (recipientPhone) payload.recipientPhone = recipientPhone;
+    if (pushName) payload.pushName = pushName;
+    if (text) payload.text = text;
+
+    const res = await fetch('/simulate/inbound', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Simulation failed');
+    simulationLog.textContent = prettySimulationResult(data);
+  } catch (err) {
+    simulationLog.textContent = err.message;
+  }
+}
+
 async function refreshSessions() {
   try {
     const res = await fetch('/sessions');
     const data = await res.json();
     sessionList.innerHTML = '';
-    (data.sessions || []).forEach(id => {
+    (data.sessionDetails || []).forEach(session => {
       const li = document.createElement('li');
-      li.textContent = id;
+      const label = document.createElement('span');
+      const connectedNumber = session.connectedNumber ? ` (${session.connectedNumber})` : '';
+      label.textContent = `${session.sessionId}${connectedNumber}`;
+      li.appendChild(label);
+
       const btn = document.createElement('button');
       btn.className = 'ghost';
       btn.textContent = 'Use';
       btn.onclick = () => {
-        sessionIdEl.value = id;
-        msgSessionIdEl.value = id;
+        sessionIdEl.value = session.sessionId;
+        msgSessionIdEl.value = session.sessionId;
+        simSessionIdEl.value = session.sessionId;
+        simRecipientPhoneEl.value = session.connectedNumber || '';
       };
       li.appendChild(btn);
       sessionList.appendChild(li);
     });
-    if (!data.sessions || data.sessions.length === 0) {
+    if (!data.sessionDetails || data.sessionDetails.length === 0) {
       sessionList.innerHTML = '<li class="muted">No active sessions</li>';
     }
   } catch (err) {
@@ -172,6 +239,7 @@ createSessionBtn.addEventListener('click', initSession);
 refreshQrBtn.addEventListener('click', refreshQr);
 deleteSessionBtn.addEventListener('click', deleteSession);
 sendMessageBtn.addEventListener('click', sendMessage);
+simulateInboundBtn.addEventListener('click', simulateInbound);
 refreshSessionsBtn.addEventListener('click', refreshSessions);
 
 checkServer();

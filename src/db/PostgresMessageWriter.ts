@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { proto } from '@whiskeysockets/baileys';
 
 type PgQueryable = {
@@ -637,6 +638,171 @@ class PostgresMessageWriter {
               AND channel = 'whatsapp'
               AND external_message_id = $2
         `, [session.tenantId, messageId, mediaUrl]);
+    }
+
+    private async resolveConnectedNumberForSession(queryable: PgQueryable, sessionId: string): Promise<string | null> {
+        const sql = `
+            SELECT COALESCE(
+                metadata->'last_refresh_response'->>'connectedNumber',
+                metadata->'last_connect_response'->>'connectedNumber',
+                metadata->'last_refresh_response'->'me'->>'phone',
+                metadata->'last_connect_response'->'me'->>'phone'
+            ) AS connected_number
+            FROM et_channel_sessions
+            WHERE channel_type = 'WHATSAPP'
+              AND session_identifier = $1
+            LIMIT 1
+        `;
+
+        const result = await queryable.query(sql, [sessionId]);
+        const connectedNumber = result.rows[0]?.connected_number;
+        return typeof connectedNumber === 'string' && connectedNumber.trim() ? connectedNumber.trim() : null;
+    }
+
+    private async resolveSessionIdForRecipientPhone(queryable: PgQueryable, recipientPhone: string): Promise<string | null> {
+        const digits = recipientPhone.replace(/\D/g, '');
+        if (!digits) return null;
+
+        const sql = `
+            SELECT session_identifier
+            FROM et_channel_sessions
+            WHERE channel_type = 'WHATSAPP'
+              AND regexp_replace(COALESCE(
+                    metadata->'last_refresh_response'->>'connectedNumber',
+                    metadata->'last_connect_response'->>'connectedNumber',
+                    metadata->'last_refresh_response'->'me'->>'phone',
+                    metadata->'last_connect_response'->'me'->>'phone',
+                    ''
+                ), '\\D', '', 'g') = $1
+            ORDER BY updated_at DESC NULLS LAST, id DESC
+            LIMIT 1
+        `;
+
+        const result = await queryable.query(sql, [digits]);
+        return result.rows[0]?.session_identifier || null;
+    }
+
+    async simulateInboundTextMessage(params: {
+        sessionId?: string;
+        recipientPhone?: string;
+        senderPhone: string;
+        text?: string;
+        pushName?: string;
+        messageId?: string;
+    }): Promise<{
+        sessionId: string;
+        recipientPhone: string | null;
+        senderPhone: string;
+        messageId: string;
+        inbox: any | null;
+        message: any | null;
+        triggerWorked: boolean;
+    }> {
+        const pool = this.getPool();
+        if (!pool) {
+            throw new Error('DATABASE_URL is not configured');
+        }
+
+        await this.ensureInboxSchema();
+
+        const senderPhone = String(params.senderPhone || '').replace(/\D/g, '');
+        if (!senderPhone) {
+            throw new Error('senderPhone is required');
+        }
+
+        let sessionId = String(params.sessionId || '').trim();
+        let recipientPhone = String(params.recipientPhone || '').replace(/\D/g, '') || null;
+
+        if (!sessionId) {
+            if (!recipientPhone) {
+                throw new Error('Provide either sessionId or recipientPhone');
+            }
+
+            sessionId = (await this.resolveSessionIdForRecipientPhone(pool, recipientPhone)) || '';
+            if (!sessionId) {
+                throw new Error(`No WhatsApp session found for recipient phone ${recipientPhone}`);
+            }
+        }
+
+        const session = await this.resolveSession(pool, sessionId);
+        if (!session) {
+            throw new Error(`Session ${sessionId} was not found in et_channel_sessions`);
+        }
+
+        if (!recipientPhone) {
+            recipientPhone = await this.resolveConnectedNumberForSession(pool, sessionId);
+        }
+
+        const messageId = String(params.messageId || '').trim() || `sim_${Date.now()}_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+        const text = String(params.text || '').trim() || `Simulation inbound message at ${new Date().toISOString()}`;
+        const pushName = String(params.pushName || '').trim() || `Simulator ${senderPhone}`;
+        const senderJid = `${senderPhone}@s.whatsapp.net`;
+
+        const msg = {
+            key: {
+                remoteJid: senderJid,
+                fromMe: false,
+                id: messageId,
+            },
+            messageTimestamp: Math.floor(Date.now() / 1000),
+            pushName,
+            message: {
+                conversation: text,
+            },
+        } as proto.IWebMessageInfo;
+
+        await this.storeInboundMessage(sessionId, msg, senderJid, null, recipientPhone);
+
+        const inboxResult = await pool.query(`
+            SELECT
+                id,
+                session_identifier,
+                external_message_id,
+                process_status,
+                process_attempts,
+                last_error,
+                sender_phone,
+                recipient_phone,
+                processed_at,
+                created_at
+            FROM wa_inbound_inbox
+            WHERE session_identifier = $1
+              AND external_message_id = $2
+            LIMIT 1
+        `, [sessionId, messageId]);
+
+        const messageResult = await pool.query(`
+            SELECT
+                id,
+                tenant_id,
+                lead_id,
+                thread_id,
+                channel_session_id,
+                external_message_id,
+                direction,
+                message_type,
+                text_content,
+                sender_phone,
+                recipient_phone,
+                created_at
+            FROM et_messages
+            WHERE tenant_id = $1
+              AND channel = 'whatsapp'
+              AND external_message_id = $2
+            LIMIT 1
+        `, [session.tenantId, messageId]);
+
+        const storedMessage = messageResult.rows[0] || null;
+
+        return {
+            sessionId,
+            recipientPhone,
+            senderPhone,
+            messageId,
+            inbox: inboxResult.rows[0] || null,
+            message: storedMessage,
+            triggerWorked: !!storedMessage?.thread_id,
+        };
     }
 
     /**

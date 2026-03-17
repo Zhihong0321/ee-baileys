@@ -68,6 +68,37 @@
     </section>
 
     <section class="card">
+      <h2>Simulate Inbound</h2>
+      <p class="muted">Create a fake incoming WhatsApp text and verify that Postgres wrote the message and assigned a thread.</p>
+      <div class="grid">
+        <label class="field">
+          <span>Session ID</span>
+          <input id="simSessionId" type="text" placeholder="optional if recipient phone is known" />
+        </label>
+        <label class="field">
+          <span>Recipient WhatsApp Number</span>
+          <input id="simRecipientPhone" type="text" placeholder="e.g. 60182920127" />
+        </label>
+        <label class="field">
+          <span>Sender Phone</span>
+          <input id="simSenderPhone" type="text" placeholder="e.g. 60126881912" />
+        </label>
+        <label class="field">
+          <span>Push Name</span>
+          <input id="simPushName" type="text" placeholder="e.g. Test Customer" />
+        </label>
+        <label class="field field-span-2">
+          <span>Message</span>
+          <textarea id="simText" rows="3" placeholder="Simulation inbound message"></textarea>
+        </label>
+        <div class="actions">
+          <button id="simulateInbound">Run Simulation</button>
+        </div>
+      </div>
+      <pre class="log" id="simulationLog"></pre>
+    </section>
+
+    <section class="card">
       <h2>Active Sessions</h2>
       <div class="actions">
         <button id="refreshSessions" class="ghost">Refresh List</button>

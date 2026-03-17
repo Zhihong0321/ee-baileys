@@ -30,6 +30,7 @@
         <a href="#sessions-get">GET /sessions/:id</a>
         <a href="#sessions-qr">GET /sessions/:id/qr</a>
         <a href="#messages-send">POST /messages/send</a>
+        <a href="#simulate-inbound">POST /simulate/inbound</a>
         <a href="#groups-create">POST /groups/create</a>
         <a href="#leads-verify">POST /leads/verify-whatsapp</a>
         <a href="#chats-list">GET /chats</a>
@@ -59,6 +60,7 @@
             <li><code>GET /sessions/:id</code></li>
             <li><code>GET /sessions/:id/qr</code></li>
             <li><code>POST /messages/send</code></li>
+            <li><code>POST /simulate/inbound</code></li>
             <li><code>POST /groups/create</code></li>
             <li><code>POST /leads/verify-whatsapp</code></li>
             <li><code>GET /chats?sessionId=...&amp;limit=100</code></li>
@@ -335,6 +337,77 @@
     "to":"14155552671",
     "text":"Hi there"
   }'</code></pre>
+        </section>
+
+        <section id="simulate-inbound">
+          <h2><span class="method post">POST</span><span class="endpoint">/simulate/inbound</span></h2>
+          <p class="muted">Inject a fake inbound WhatsApp text into the same Postgres flow used by real incoming messages. Useful for testing lead creation, message persistence, and thread trigger assignment.</p>
+          <h3>Request Body</h3>
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Required</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>senderPhone</code></td>
+                <td>string</td>
+                <td>yes</td>
+                <td>Simulated customer phone number</td>
+              </tr>
+              <tr>
+                <td><code>recipientPhone</code></td>
+                <td>string</td>
+                <td>yes*</td>
+                <td>Connected WhatsApp number to receive the simulated message</td>
+              </tr>
+              <tr>
+                <td><code>sessionId</code></td>
+                <td>string</td>
+                <td>yes*</td>
+                <td>Alternative to <code>recipientPhone</code>; identifies the session directly</td>
+              </tr>
+              <tr>
+                <td><code>text</code></td>
+                <td>string</td>
+                <td>no</td>
+                <td>Message body. Defaults to a generated simulation text.</td>
+              </tr>
+              <tr>
+                <td><code>pushName</code></td>
+                <td>string</td>
+                <td>no</td>
+                <td>Simulated customer display name</td>
+              </tr>
+              <tr>
+                <td><code>messageId</code></td>
+                <td>string</td>
+                <td>no</td>
+                <td>Optional custom external message ID for repeatable testing</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="muted"><i>* Provide either <code>recipientPhone</code> or <code>sessionId</code>.</i></p>
+          <h3>Response 200</h3>
+          <pre class="code-block"><code>{
+  "status": "simulated",
+  "sessionId": "1:my-0182920127",
+  "recipientPhone": "60182920127",
+  "senderPhone": "60126881912",
+  "messageId": "sim_...",
+  "inbox": {
+    "process_status": "processed"
+  },
+  "message": {
+    "lead_id": 31,
+    "thread_id": 44
+  },
+  "triggerWorked": true
+}</code></pre>
         </section>
 
         <section id="groups-create">

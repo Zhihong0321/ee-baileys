@@ -28,6 +28,7 @@ app.get('/api', (req, res) => {
             'GET /sessions/:id',
             'GET /sessions/:id/qr',
             'POST /messages/send',
+            'POST /simulate/inbound',
             'POST /groups/create',
             'GET /chats?sessionId=...',
             'GET /chats/:jid/messages?sessionId=...&limit=50&beforeTimestamp=...',
@@ -212,6 +213,36 @@ app.post('/messages/send', async (req, res) => {
         });
 
         res.json({ status: 'sent', result });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/simulate/inbound', async (req, res) => {
+    const { sessionId, recipientPhone, senderPhone, text, pushName, messageId } = req.body || {};
+
+    if (!senderPhone) {
+        return res.status(400).json({ error: 'Missing required field: senderPhone' });
+    }
+
+    if (!sessionId && !recipientPhone) {
+        return res.status(400).json({ error: 'Provide sessionId or recipientPhone' });
+    }
+
+    try {
+        const result = await postgresMessageWriter.simulateInboundTextMessage({
+            sessionId,
+            recipientPhone,
+            senderPhone,
+            text,
+            pushName,
+            messageId,
+        });
+
+        res.json({
+            status: 'simulated',
+            ...result,
+        });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
     }

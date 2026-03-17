@@ -91,6 +91,10 @@ h1 {
   font-size: 14px;
 }
 
+.field-span-2 {
+  grid-column: span 2;
+}
+
 input,
 textarea {
   background: #0b1117;
@@ -183,6 +187,8 @@ button.danger {
   border: 1px solid var(--border);
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  gap: 12px;
 }
 
 .log {
@@ -319,5 +325,9 @@ button.danger {
 
   .docs-nav {
     position: static;
+  }
+
+  .field-span-2 {
+    grid-column: span 1;
   }
 }
