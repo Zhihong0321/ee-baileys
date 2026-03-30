@@ -261,16 +261,30 @@ app.post('/groups/create', async (req, res) => {
             return res.status(400).json({ error: 'Session not connected' });
         }
 
-        // Format participants to ensure they are full JIDs if they are just raw numbers
+        // Format participants to ensure they are full JIDs if they are just raw numbers.
         const jids = participants.map(p => {
-            const str = String(p).trim();
-            return str.includes('@s.whatsapp.net') ? str : `${str}@s.whatsapp.net`;
+            const str = String(p).trim().toLowerCase();
+            if (!str) return str;
+            if (str.endsWith('@s.whatsapp.net') || str.endsWith('@lid') || str.endsWith('@g.us')) {
+                return str;
+            }
+
+            const digits = str.replace(/[^\d]/g, '');
+            return digits ? `${digits}@s.whatsapp.net` : str;
         });
 
-        console.log(`[${sessionId}] Creating group "${subject}" with ${jids.length} participants`);
-        const group = await instance.sock.groupCreate(subject, jids);
+        console.log(`[${sessionId}] Group create request for "${subject}" with ${jids.length} participants`);
+        const result = await instance.createGroupIfMissing(subject, jids);
 
-        res.json({ status: 'created', group });
+        if (result.status === 'duplicate') {
+            console.log(`[${sessionId}] Duplicate group blocked for members: ${jids.join(', ')}`);
+            return res.status(409).json({
+                error: 'A group with the same member list already exists',
+                status: 'duplicate',
+                group: result.group,
+            });
+        }
+        res.json({ status: 'created', group: result.group });
     } catch (err: any) {
         console.error(`[${sessionId}] Failed to create group:`, err);
         res.status(500).json({ error: err.message });

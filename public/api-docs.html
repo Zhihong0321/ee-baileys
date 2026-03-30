@@ -412,18 +412,20 @@
 
         <section id="groups-create">
           <h2><span class="method post">POST</span><span class="endpoint">/groups/create</span></h2>
-          <p class="muted">Create a new WhatsApp group using an already connected session. The server calls Baileys `groupCreate(...)` under the hood and returns the raw WhatsApp group object in the response.</p>
+          <p class="muted">Create a new WhatsApp group using an already connected session. The server calls Baileys `groupCreate(...)` under the hood and returns the raw WhatsApp group object in the response. This endpoint blocks duplicate groups when the exact member list already exists, regardless of group name.</p>
           <h3>What This Endpoint Does</h3>
           <ul>
             <li>Uses the connected WhatsApp account in <code>sessionId</code> to create the group.</li>
             <li>Normalizes participant inputs, so raw numbers like <code>601121000099</code> become <code>601121000099@s.whatsapp.net</code>.</li>
             <li>Returns the created group metadata, including the group JID, subject, owner, and participants.</li>
+            <li>Checks existing participating groups and blocks creation when the member set matches exactly.</li>
           </ul>
           <h3>Important Notes</h3>
           <ul>
             <li>The session must already be connected before you call this endpoint.</li>
             <li><code>participants</code> must be a non-empty array of strings or numbers.</li>
             <li>The session owner becomes the group creator and superadmin.</li>
+            <li>Group name is not used for duplicate detection.</li>
             <li>If WhatsApp rejects one of the participant numbers, the request will fail with a server error returned from Baileys/WhatsApp.</li>
           </ul>
           <h3>Request Body</h3>
@@ -518,6 +520,16 @@
     ]
   }
 }</code></pre>
+          <h3>Response 409</h3>
+          <pre class="code-block"><code>{
+  "error": "A group with the same member list already exists",
+  "status": "duplicate",
+  "group": {
+    "id": "120363424859950856@g.us",
+    "subject": "Existing Group Name",
+    "participants": [...]
+  }
+}</code></pre>
           <h3>Common Errors</h3>
           <table class="doc-table">
             <thead>
@@ -534,6 +546,10 @@
               <tr>
                 <td>400</td>
                 <td>The session exists but is not connected yet.</td>
+              </tr>
+              <tr>
+                <td>409</td>
+                <td>An existing WhatsApp group already has the same member list, so the server returns the existing group instead of creating a duplicate.</td>
               </tr>
               <tr>
                 <td>500</td>

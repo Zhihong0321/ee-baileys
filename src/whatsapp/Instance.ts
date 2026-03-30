@@ -6,6 +6,7 @@ import makeWASocket, {
     downloadMediaMessage,
     ConnectionState,
     WASocket,
+    GroupMetadata,
     proto,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
@@ -27,6 +28,7 @@ export class WhatsAppInstance {
     public lastError?: string;
     private destroyed = false;
     private saveMutex = new Mutex();
+    private groupCreateMutex = new Mutex();
     private chats = new Map<string, any>();
     private messagesByChat = new Map<string, Map<string, proto.IWebMessageInfo>>();
     private maxCachedMessagesPerChat: number;
@@ -263,6 +265,104 @@ export class WhatsAppInstance {
 
     getConnectedNumber(): string | null {
         return this.getMe()?.phone || null;
+    }
+
+    /**
+     * Canonicalize a member identifier for exact group membership comparisons.
+     * Raw numbers are normalized to PN JIDs; existing JIDs are preserved.
+     */
+    private canonicalizeMemberId(value: string | null | undefined): string | null {
+        const raw = String(value || '').trim().toLowerCase();
+        if (!raw) return null;
+
+        if (raw.endsWith('@s.whatsapp.net') || raw.endsWith('@lid') || raw.endsWith('@g.us')) {
+            return raw;
+        }
+
+        const digits = raw.replace(/[^\d]/g, '');
+        if (!digits) return null;
+        return `${digits}@s.whatsapp.net`;
+    }
+
+    private canonicalizeGroupParticipant(participant: { id?: string; phoneNumber?: string } | string): string | null {
+        if (typeof participant === 'string') {
+            return this.canonicalizeMemberId(participant);
+        }
+
+        return this.canonicalizeMemberId(participant.phoneNumber || participant.id || null);
+    }
+
+    private buildGroupMemberSet(group: GroupMetadata): Set<string> {
+        const members = new Set<string>();
+
+        for (const participant of group.participants || []) {
+            const canonical = this.canonicalizeGroupParticipant(participant);
+            if (canonical) members.add(canonical);
+        }
+
+        const owner = this.canonicalizeMemberId(group.ownerPn || group.owner || null);
+        if (owner) members.add(owner);
+
+        return members;
+    }
+
+    private buildRequestedMemberSet(participants: string[]): Set<string> {
+        const members = new Set<string>();
+
+        for (const participant of participants || []) {
+            const canonical = this.canonicalizeMemberId(participant);
+            if (canonical) members.add(canonical);
+        }
+
+        const me = this.getMe();
+        const self = this.canonicalizeMemberId(me?.phone ? `${me.phone}@s.whatsapp.net` : me?.id || null);
+        if (self) members.add(self);
+
+        return members;
+    }
+
+    async findExistingGroupByParticipants(participants: string[]): Promise<GroupMetadata | null> {
+        if (!this.sock?.user) {
+            throw new Error('Session not connected');
+        }
+
+        const requestedMembers = this.buildRequestedMemberSet(participants);
+        const existingGroups = await this.sock.groupFetchAllParticipating();
+
+        for (const group of Object.values(existingGroups || {})) {
+            const existingMembers = this.buildGroupMemberSet(group);
+            if (existingMembers.size !== requestedMembers.size) continue;
+
+            let isSame = true;
+            for (const member of requestedMembers) {
+                if (!existingMembers.has(member)) {
+                    isSame = false;
+                    break;
+                }
+            }
+
+            if (isSame) {
+                return group;
+            }
+        }
+
+        return null;
+    }
+
+    async createGroupIfMissing(subject: string, participants: string[]): Promise<{ status: 'created' | 'duplicate'; group: GroupMetadata }> {
+        if (!this.sock?.user) {
+            throw new Error('Session not connected');
+        }
+
+        return this.groupCreateMutex.runExclusive(async () => {
+            const existingGroup = await this.findExistingGroupByParticipants(participants);
+            if (existingGroup) {
+                return { status: 'duplicate', group: existingGroup };
+            }
+
+            const group = await this.sock!.groupCreate(subject, participants);
+            return { status: 'created', group };
+        });
     }
 
     async logout() {
