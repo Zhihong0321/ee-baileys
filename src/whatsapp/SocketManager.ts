@@ -1,7 +1,7 @@
 import { WhatsAppInstance } from './Instance';
 import { staggerer } from '../lib/Staggerer';
 import fs from 'fs-extra';
-import { SESSIONS_BASE_DIR } from '../config/paths';
+import { SESSIONS_BASE_DIR, resolveSessionPath } from '../config/paths';
 
 export class WhatsAppManager {
     private instances = new Map<string, WhatsAppInstance>();
@@ -49,8 +49,19 @@ export class WhatsAppManager {
     async removeInstance(sessionId: string) {
         const instance = this.instances.get(sessionId);
         if (instance) {
-            await instance.logout();
+            try {
+                await instance.logout();
+            } catch (err) {
+                console.error(`[Manager] Error during logout for ${sessionId}:`, err);
+            }
             this.instances.delete(sessionId);
+        }
+
+        // Force delete session folder if it still exists
+        const sessionPath = resolveSessionPath(sessionId);
+        if (await fs.pathExists(sessionPath)) {
+            console.log(`[Manager] Deleting session folder: ${sessionPath}`);
+            await fs.remove(sessionPath);
         }
     }
 }

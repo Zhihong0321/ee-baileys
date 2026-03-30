@@ -114,7 +114,7 @@ async function deleteSession() {
   const sessionId = sessionIdEl.value.trim();
   if (!sessionId) return alert('Enter a session ID');
 
-  if (!confirm('Logout this session?')) return;
+  if (!confirm('Logout and delete this session?')) return;
   try {
     const res = await fetch(`/sessions/${encodeURIComponent(sessionId)}`, {
       method: 'DELETE'
@@ -225,6 +225,30 @@ async function refreshSessions() {
         simRecipientPhoneEl.value = session.connectedNumber || '';
       };
       li.appendChild(btn);
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'danger ghost';
+      deleteBtn.textContent = 'Logout / Delete';
+      deleteBtn.style.marginLeft = '8px';
+      deleteBtn.onclick = async () => {
+        if (!confirm(`Logout and delete session ${session.sessionId}?`)) return;
+        try {
+          const res = await fetch(`/sessions/${encodeURIComponent(session.sessionId)}`, {
+            method: 'DELETE'
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Failed to delete session');
+          await refreshSessions();
+          if (sessionIdEl.value === session.sessionId) {
+            sessionStatus.textContent = 'Logged out';
+            renderQr(null);
+          }
+        } catch (err) {
+          alert(err.message);
+        }
+      };
+      li.appendChild(deleteBtn);
+
       sessionList.appendChild(li);
     });
     if (!data.sessionDetails || data.sessionDetails.length === 0) {
