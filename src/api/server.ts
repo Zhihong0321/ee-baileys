@@ -249,7 +249,8 @@ app.post('/simulate/inbound', async (req, res) => {
 });
 
 app.post('/groups/create', async (req, res) => {
-    const { sessionId, subject, participants } = req.body;
+    const { sessionId, subject, participants, profileImageUrl, profileImage } = req.body;
+    const imageSource = String(profileImageUrl || profileImage || '').trim();
 
     if (!sessionId || !subject || !participants || !Array.isArray(participants)) {
         return res.status(400).json({ error: 'Missing or invalid parameters. Required: sessionId, subject, participants (array of strings)' });
@@ -282,9 +283,53 @@ app.post('/groups/create', async (req, res) => {
                 error: 'A group with the same member list already exists',
                 status: 'duplicate',
                 group: result.group,
+                profileImageStatus: imageSource ? 'skipped_duplicate' : 'skipped',
             });
         }
-        res.json({ status: 'created', group: result.group });
+
+        let profileImageStatus: 'skipped' | 'applied' | 'failed' = 'skipped';
+        let profileImageError: string | null = null;
+
+        if (imageSource) {
+            try {
+                const getBuffer = async (source: string) => {
+                    const trimmed = String(source || '').trim();
+                    if (!trimmed) {
+                        throw new Error('Empty profile image source');
+                    }
+
+                    if (trimmed.startsWith('data:')) {
+                        const commaIndex = trimmed.indexOf(',');
+                        if (commaIndex === -1) {
+                            throw new Error('Invalid data URL');
+                        }
+
+                        const meta = trimmed.slice(5, commaIndex);
+                        const payload = trimmed.slice(commaIndex + 1);
+                        return Buffer.from(payload, meta.includes(';base64') ? 'base64' : 'utf8');
+                    }
+
+                    const imageRes = await axios.get(trimmed, { responseType: 'arraybuffer' });
+                    return Buffer.from(imageRes.data, 'binary');
+                };
+
+                console.log(`[${sessionId}] Downloading group profile image: ${imageSource}`);
+                const imageBuffer = await getBuffer(imageSource);
+                await instance.sock!.updateProfilePicture(result.group.id, imageBuffer);
+                profileImageStatus = 'applied';
+            } catch (err: any) {
+                profileImageStatus = 'failed';
+                profileImageError = err.message;
+                console.error(`[${sessionId}] Failed to apply group profile image:`, err);
+            }
+        }
+
+        res.json({
+            status: 'created',
+            group: result.group,
+            profileImageStatus,
+            ...(profileImageError ? { profileImageError } : {}),
+        });
     } catch (err: any) {
         console.error(`[${sessionId}] Failed to create group:`, err);
         res.status(500).json({ error: err.message });
