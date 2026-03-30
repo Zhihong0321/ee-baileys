@@ -114,7 +114,7 @@ async function deleteSession() {
   const sessionId = sessionIdEl.value.trim();
   if (!sessionId) return alert('Enter a session ID');
 
-  if (!confirm('Logout and delete this session?')) return;
+  if (!confirm('Logout and permanently delete this session?')) return;
   try {
     const res = await fetch(`/sessions/${encodeURIComponent(sessionId)}`, {
       method: 'DELETE'
@@ -210,10 +210,22 @@ async function refreshSessions() {
     sessionList.innerHTML = '';
     (data.sessionDetails || []).forEach(session => {
       const li = document.createElement('li');
+      const labelWrap = document.createElement('div');
+      labelWrap.className = 'session-label-group';
+
       const label = document.createElement('span');
-      const connectedNumber = session.connectedNumber ? ` (${session.connectedNumber})` : '';
-      label.textContent = `${session.sessionId}${connectedNumber}`;
-      li.appendChild(label);
+      label.className = 'session-label';
+      label.textContent = session.connectedNumber || session.sessionId;
+      labelWrap.appendChild(label);
+
+      if (session.connectedNumber && session.connectedNumber !== session.sessionId) {
+        const subtitle = document.createElement('span');
+        subtitle.className = 'session-subtitle muted';
+        subtitle.textContent = `Session ID: ${session.sessionId}`;
+        labelWrap.appendChild(subtitle);
+      }
+
+      li.appendChild(labelWrap);
 
       const btn = document.createElement('button');
       btn.className = 'ghost';
@@ -223,15 +235,18 @@ async function refreshSessions() {
         msgSessionIdEl.value = session.sessionId;
         simSessionIdEl.value = session.sessionId;
         simRecipientPhoneEl.value = session.connectedNumber || '';
+        sessionStatus.textContent = session.connectedNumber
+          ? `Connected number: ${session.connectedNumber}`
+          : `Session ID: ${session.sessionId}`;
       };
       li.appendChild(btn);
 
       const deleteBtn = document.createElement('button');
       deleteBtn.className = 'danger ghost';
-      deleteBtn.textContent = 'Logout / Delete';
+      deleteBtn.textContent = 'Delete Session';
       deleteBtn.style.marginLeft = '8px';
       deleteBtn.onclick = async () => {
-        if (!confirm(`Logout and delete session ${session.sessionId}?`)) return;
+        if (!confirm(`Logout and permanently delete session ${session.sessionId}?`)) return;
         try {
           const res = await fetch(`/sessions/${encodeURIComponent(session.sessionId)}`, {
             method: 'DELETE'

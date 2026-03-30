@@ -191,6 +191,22 @@ button.danger {
   gap: 12px;
 }
 
+.session-label-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.session-label {
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.session-subtitle {
+  font-size: 12px;
+}
+
 .log {
   background: #0b1117;
   border-radius: 12px;

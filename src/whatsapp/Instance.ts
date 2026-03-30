@@ -25,6 +25,7 @@ export class WhatsAppInstance {
     public sock?: WASocket;
     private qr?: string;
     public lastError?: string;
+    private destroyed = false;
     private saveMutex = new Mutex();
     private chats = new Map<string, any>();
     private messagesByChat = new Map<string, Map<string, proto.IWebMessageInfo>>();
@@ -37,12 +38,27 @@ export class WhatsAppInstance {
 
     async init() {
         try {
+            if (this.destroyed) {
+                console.log(`[${this.sessionId}] Init skipped because session was deleted`);
+                return;
+            }
+
             console.log(`[${this.sessionId}] Initializing session...`);
             const sessionPath = resolveSessionPath(this.sessionId);
             await fs.ensureDir(sessionPath);
+            if (this.destroyed) {
+                await fs.remove(sessionPath);
+                console.log(`[${this.sessionId}] Init aborted after deletion`);
+                return;
+            }
             console.log(`[${this.sessionId}] Session path: ${sessionPath}`);
 
             const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
+            if (this.destroyed) {
+                await fs.remove(sessionPath);
+                console.log(`[${this.sessionId}] Init aborted after auth load because session was deleted`);
+                return;
+            }
             console.log(`[${this.sessionId}] Auth state loaded`);
 
             // Timeout version fetch to 5s
@@ -55,6 +71,11 @@ export class WhatsAppInstance {
                 console.log(`[${this.sessionId}] Version fetch failed/timed out, using fallback: ${err.message}`);
                 return { version: [2, 3100, 1015901307] };
             });
+            if (this.destroyed) {
+                await fs.remove(sessionPath);
+                console.log(`[${this.sessionId}] Init aborted after version fetch because session was deleted`);
+                return;
+            }
             const version = versionResult.version;
             console.log(`[${this.sessionId}] Using Baileys version: ${version}`);
 
@@ -76,12 +97,15 @@ export class WhatsAppInstance {
 
             // Atomic Save wrapper
             const atomicSave = async () => {
+                if (this.destroyed) return;
                 await this.saveMutex.runExclusive(async () => {
+                    if (this.destroyed) return;
                     await saveCreds();
                 });
             };
 
             this.sock.ev.on('connection.update', async (update: Partial<ConnectionState>) => {
+                if (this.destroyed) return;
                 console.log(`[${this.sessionId}] Connection Update:`, JSON.stringify(update, null, 2));
                 const { connection, lastDisconnect, qr } = update;
                 if (qr) this.qr = qr;
@@ -97,6 +121,7 @@ export class WhatsAppInstance {
                 }
 
                 if (connection === 'close') {
+                    if (this.destroyed) return;
                     const error = lastDisconnect?.error as Boom;
                     const statusCode = error?.output?.statusCode;
                     const message = error?.message || 'Unknown error';
@@ -106,6 +131,7 @@ export class WhatsAppInstance {
                     console.log(`[${this.sessionId}] ${this.lastError}. Reconnect: ${shouldReconnect}`);
 
                     if (shouldReconnect) {
+                        if (this.destroyed) return;
                         this.init();
                     } else {
                         console.log(`[${this.sessionId}] Logged out. Cleaning up...`);
@@ -121,15 +147,18 @@ export class WhatsAppInstance {
             this.sock.ev.on('creds.update', atomicSave);
 
             this.sock.ev.on('messaging-history.set', ({ chats, messages }) => {
+                if (this.destroyed) return;
                 this.upsertChats(chats);
                 this.cacheMessages(messages);
             });
 
             this.sock.ev.on('chats.upsert', (chats) => {
+                if (this.destroyed) return;
                 this.upsertChats(chats);
             });
 
             this.sock.ev.on('chats.update', (updates) => {
+                if (this.destroyed) return;
                 for (const update of updates) {
                     const jid = this.resolveChatJid(update);
                     if (!jid) continue;
@@ -144,6 +173,7 @@ export class WhatsAppInstance {
             });
 
             this.sock.ev.on('chats.delete', (jids) => {
+                if (this.destroyed) return;
                 for (const jid of jids) {
                     this.chats.delete(jid);
                     this.messagesByChat.delete(jid);
@@ -151,6 +181,7 @@ export class WhatsAppInstance {
             });
 
             this.sock.ev.on('messages.upsert', async ({ messages, type }) => {
+                if (this.destroyed) return;
                 this.cacheMessages(messages);
                 if (type !== 'notify') return;
 
@@ -206,6 +237,10 @@ export class WhatsAppInstance {
 
             return this.sock;
         } catch (err: any) {
+            if (this.destroyed) {
+                console.log(`[${this.sessionId}] Init aborted because session was deleted`);
+                return;
+            }
             this.lastError = `Initialization failed: ${err.message}`;
             console.error(`[${this.sessionId}] ${this.lastError}`);
             throw err;
@@ -234,6 +269,24 @@ export class WhatsAppInstance {
         if (this.sock) {
             await this.sock.logout();
             this.sock = undefined;
+        }
+    }
+
+    async destroy() {
+        this.destroyed = true;
+        this.qr = undefined;
+        this.lastError = undefined;
+        this.chats.clear();
+        this.messagesByChat.clear();
+
+        if (this.sock) {
+            try {
+                await this.sock.logout();
+            } catch (err) {
+                console.error(`[${this.sessionId}] Error while destroying session:`, err);
+            } finally {
+                this.sock = undefined;
+            }
         }
     }
 

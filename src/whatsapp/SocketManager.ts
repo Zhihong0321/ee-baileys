@@ -48,13 +48,14 @@ export class WhatsAppManager {
 
     async removeInstance(sessionId: string) {
         const instance = this.instances.get(sessionId);
+        this.instances.delete(sessionId);
+
         if (instance) {
             try {
-                await instance.logout();
+                await instance.destroy();
             } catch (err) {
-                console.error(`[Manager] Error during logout for ${sessionId}:`, err);
+                console.error(`[Manager] Error during session destroy for ${sessionId}:`, err);
             }
-            this.instances.delete(sessionId);
         }
 
         // Force delete session folder if it still exists

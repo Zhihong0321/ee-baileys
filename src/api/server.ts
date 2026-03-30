@@ -326,7 +326,7 @@ app.get('/chats/:jid/messages', async (req, res) => {
     });
 });
 
-// Logout/Delete
+// Logout and permanently delete session data
 app.delete('/sessions/:id', async (req, res) => {
     try {
         await manager.removeInstance(req.params.id);
