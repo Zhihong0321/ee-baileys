@@ -412,7 +412,20 @@
 
         <section id="groups-create">
           <h2><span class="method post">POST</span><span class="endpoint">/groups/create</span></h2>
-          <p class="muted">Create a new WhatsApp group with the connected session.</p>
+          <p class="muted">Create a new WhatsApp group using an already connected session. The server calls Baileys `groupCreate(...)` under the hood and returns the raw WhatsApp group object in the response.</p>
+          <h3>What This Endpoint Does</h3>
+          <ul>
+            <li>Uses the connected WhatsApp account in <code>sessionId</code> to create the group.</li>
+            <li>Normalizes participant inputs, so raw numbers like <code>601121000099</code> become <code>601121000099@s.whatsapp.net</code>.</li>
+            <li>Returns the created group metadata, including the group JID, subject, owner, and participants.</li>
+          </ul>
+          <h3>Important Notes</h3>
+          <ul>
+            <li>The session must already be connected before you call this endpoint.</li>
+            <li><code>participants</code> must be a non-empty array of strings or numbers.</li>
+            <li>The session owner becomes the group creator and superadmin.</li>
+            <li>If WhatsApp rejects one of the participant numbers, the request will fail with a server error returned from Baileys/WhatsApp.</li>
+          </ul>
           <h3>Request Body</h3>
           <table class="doc-table">
             <thead>
@@ -428,48 +441,113 @@
                 <td><code>sessionId</code></td>
                 <td>string</td>
                 <td>yes</td>
-                <td>Connected session ID</td>
+                <td>The internal Baileys session ID that is already connected</td>
               </tr>
               <tr>
                 <td><code>subject</code></td>
                 <td>string</td>
                 <td>yes</td>
-                <td>The name/subject of the new group</td>
+                <td>The group name shown to WhatsApp members</td>
               </tr>
               <tr>
                 <td><code>participants</code></td>
                 <td>array of strings</td>
                 <td>yes</td>
-                <td>Array of phone numbers to invite to the group. Server appends <code>@s.whatsapp.net</code> if
-                  missing.</td>
+                <td>Array of WhatsApp numbers or JIDs to add to the group. Raw numbers are auto-converted to <code>@s.whatsapp.net</code>.</td>
+              </tr>
+            </tbody>
+          </table>
+          <h3>Request Rules</h3>
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>Rule</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Session state</td>
+                <td>The session must exist in memory and be connected (<code>instance.sock.user</code> must be present).</td>
+              </tr>
+              <tr>
+                <td>Participant format</td>
+                <td>Accepts either raw mobile numbers like <code>601121000099</code> or full JIDs like <code>601121000099@s.whatsapp.net</code>.</td>
+              </tr>
+              <tr>
+                <td>Normalization</td>
+                <td>The server trims whitespace and appends <code>@s.whatsapp.net</code> when the suffix is missing.</td>
               </tr>
             </tbody>
           </table>
           <h3>Example Request</h3>
           <pre class="code-block"><code>{
-  "sessionId": "101:sales-1",
-  "subject": "My Test Group",
+  "sessionId": "eternalgy-auth",
+  "subject": "Bailey Group Test",
   "participants": [
-    "14155552671",
-    "1234567890"
+    "601121000099",
+    "60182920127"
   ]
 }</code></pre>
           <h3>Response 200</h3>
           <pre class="code-block"><code>{
   "status": "created",
   "group": {
-    "id": "1234567890-7890@g.us",
-    "subject": "My Test Group",
-    "participants": [...]
+    "id": "120363424859950856@g.us",
+    "addressingMode": "lid",
+    "subject": "Bailey Group Test",
+    "owner": "165863617507389@lid",
+    "ownerPn": "601158942400@s.whatsapp.net",
+    "size": 3,
+    "participants": [
+      {
+        "id": "165863617507389@lid",
+        "phoneNumber": "601158942400@s.whatsapp.net",
+        "admin": "superadmin"
+      },
+      {
+        "id": "148963021828103@lid",
+        "phoneNumber": "60182920127@s.whatsapp.net",
+        "admin": null
+      },
+      {
+        "id": "215349811249264@lid",
+        "phoneNumber": "601121000099@s.whatsapp.net",
+        "admin": null
+      }
+    ]
   }
 }</code></pre>
+          <h3>Common Errors</h3>
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>When It Happens</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>400</td>
+                <td>Missing <code>sessionId</code>, <code>subject</code>, or <code>participants</code>, or <code>participants</code> is not an array.</td>
+              </tr>
+              <tr>
+                <td>400</td>
+                <td>The session exists but is not connected yet.</td>
+              </tr>
+              <tr>
+                <td>500</td>
+                <td>Baileys or WhatsApp rejects the request, or the group create operation fails for another runtime reason.</td>
+              </tr>
+            </tbody>
+          </table>
           <h3>cURL Example</h3>
           <pre class="code-block"><code>curl -X POST "https://YOUR-DOMAIN/groups/create" \
   -H "Content-Type: application/json" \
   -d '{
-    "sessionId":"101:sales-1",
-    "subject":"My Test Group",
-    "participants":["14155552671"]
+    "sessionId":"eternalgy-auth",
+    "subject":"Bailey Group Test",
+    "participants":["601121000099","60182920127"]
   }'</code></pre>
         </section>
 
