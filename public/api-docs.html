@@ -491,6 +491,37 @@
               </tr>
             </tbody>
           </table>
+          <h3>Execution Flow</h3>
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>Step</th>
+                <th>Behavior</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>1. Validate request</td>
+                <td>Checks that <code>sessionId</code>, <code>subject</code>, and <code>participants</code> are present and that participants is an array.</td>
+              </tr>
+              <tr>
+                <td>2. Normalize members</td>
+                <td>Trims values, converts raw numbers to <code>@s.whatsapp.net</code>, and canonicalizes the list for comparison.</td>
+              </tr>
+              <tr>
+                <td>3. Detect duplicates</td>
+                <td>Fetches existing participating groups from the connected session and compares exact member sets. Group name is ignored.</td>
+              </tr>
+              <tr>
+                <td>4. Create group</td>
+                <td>If no duplicate exists, Baileys creates the group with <code>groupCreate(...)</code>.</td>
+              </tr>
+              <tr>
+                <td>5. Apply image</td>
+                <td>If <code>profileImageUrl</code> or <code>profileImage</code> is provided, the image is downloaded and set on the new group.</td>
+              </tr>
+            </tbody>
+          </table>
           <h3>Example Request</h3>
           <pre class="code-block"><code>{
   "sessionId": "eternalgy-auth",
