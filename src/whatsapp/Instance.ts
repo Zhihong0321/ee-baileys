@@ -365,6 +365,24 @@ export class WhatsAppInstance {
         });
     }
 
+    async leaveGroup(groupJid: string): Promise<GroupMetadata> {
+        if (!this.sock?.user) {
+            throw new Error('Session not connected');
+        }
+
+        const group = await this.sock.groupMetadata(groupJid);
+        await this.sock.groupLeave(group.id);
+        return group;
+    }
+
+    forgetChat(jid: string) {
+        const normalized = String(jid || '').trim();
+        if (!normalized) return;
+
+        this.chats.delete(normalized);
+        this.messagesByChat.delete(normalized);
+    }
+
     async logout() {
         if (this.sock) {
             await this.sock.logout();

@@ -30,6 +30,7 @@ app.get('/api', (req, res) => {
             'POST /messages/send',
             'POST /simulate/inbound',
             'POST /groups/create',
+            'DELETE /groups/:jid?sessionId=...',
             'GET /chats?sessionId=...',
             'GET /chats/:jid/messages?sessionId=...&limit=50&beforeTimestamp=...',
             'DELETE /sessions/:id'
@@ -280,8 +281,9 @@ app.post('/groups/create', async (req, res) => {
         if (result.status === 'duplicate') {
             console.log(`[${sessionId}] Duplicate group blocked for members: ${jids.join(', ')}`);
             return res.status(409).json({
-                error: 'A group with the same member list already exists',
+                error: `A group with the same member list already exists (groupUid: ${result.group.id})`,
                 status: 'duplicate',
+                groupUid: result.group.id,
                 group: result.group,
                 profileImageStatus: imageSource ? 'skipped_duplicate' : 'skipped',
             });
@@ -326,12 +328,54 @@ app.post('/groups/create', async (req, res) => {
 
         res.json({
             status: 'created',
+            groupUid: result.group.id,
             group: result.group,
             profileImageStatus,
             ...(profileImageError ? { profileImageError } : {}),
         });
     } catch (err: any) {
         console.error(`[${sessionId}] Failed to create group:`, err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.delete('/groups/:jid', async (req, res) => {
+    const sessionId = String(req.query.sessionId || req.body?.sessionId || '').trim();
+    const rawJid = String(req.params.jid || '').trim();
+
+    if (!sessionId || !rawJid) {
+        return res.status(400).json({ error: 'Missing required fields: sessionId and group jid' });
+    }
+
+    const groupJid = rawJid.includes('@') ? rawJid : `${rawJid}@g.us`;
+
+    try {
+        const instance = manager.getExistingInstance(sessionId);
+        if (!instance) {
+            return res.status(404).json({ error: 'Session not found' });
+        }
+
+        if (!instance.sock?.user) {
+            return res.status(400).json({ error: 'Session not connected' });
+        }
+
+        const group = await instance.leaveGroup(groupJid);
+        instance.forgetChat(group.id);
+
+        return res.json({
+            status: 'left',
+            operation: 'group_leave',
+            groupUid: group.id,
+            group: {
+                id: group.id,
+                subject: group.subject,
+                participants: group.participants,
+                size: group.size,
+            },
+            message: 'Connected session left the group. WhatsApp does not support permanent server-side deletion of a group.',
+        });
+    } catch (err: any) {
+        console.error(`[${sessionId}] Failed to leave group ${groupJid}:`, err);
         res.status(500).json({ error: err.message });
     }
 });

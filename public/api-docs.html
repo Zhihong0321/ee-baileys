@@ -32,6 +32,7 @@
         <a href="#messages-send">POST /messages/send</a>
         <a href="#simulate-inbound">POST /simulate/inbound</a>
         <a href="#groups-create">POST /groups/create</a>
+        <a href="#groups-delete">DELETE /groups/:jid</a>
         <a href="#leads-verify">POST /leads/verify-whatsapp</a>
         <a href="#chats-list">GET /chats</a>
         <a href="#chats-messages">GET /chats/:jid/messages</a>
@@ -62,6 +63,7 @@
             <li><code>POST /messages/send</code></li>
             <li><code>POST /simulate/inbound</code></li>
             <li><code>POST /groups/create</code></li>
+            <li><code>DELETE /groups/:jid?sessionId=...</code></li>
             <li><code>POST /leads/verify-whatsapp</code></li>
             <li><code>GET /chats?sessionId=...&amp;limit=100</code></li>
             <li><code>GET /chats/:jid/messages?sessionId=...&amp;limit=50&amp;beforeTimestamp=...</code></li>
@@ -412,12 +414,13 @@
 
         <section id="groups-create">
           <h2><span class="method post">POST</span><span class="endpoint">/groups/create</span></h2>
-          <p class="muted">Create a new WhatsApp group using an already connected session. The server calls Baileys `groupCreate(...)` under the hood and returns the raw WhatsApp group object in the response. This endpoint blocks duplicate groups when the exact member list already exists, regardless of group name. An optional group profile image can be applied after creation.</p>
+          <p class="muted">Create a new WhatsApp group using an already connected session. The server calls Baileys `groupCreate(...)` under the hood and returns the raw WhatsApp group object in the response. This endpoint blocks duplicate groups when the exact member list already exists, regardless of group name. An optional group profile image can be applied after creation. The response always includes <code>groupUid</code>, which is the same value as <code>group.id</code>.</p>
           <h3>What This Endpoint Does</h3>
           <ul>
             <li>Uses the connected WhatsApp account in <code>sessionId</code> to create the group.</li>
             <li>Normalizes participant inputs, so raw numbers like <code>601121000099</code> become <code>601121000099@s.whatsapp.net</code>.</li>
             <li>Returns the created group metadata, including the group JID, subject, owner, and participants.</li>
+            <li>Returns <code>groupUid</code> so clients can reference the group without digging into nested metadata.</li>
             <li>Checks existing participating groups and blocks creation when the member set matches exactly.</li>
             <li>Optionally applies a group profile image if <code>profileImageUrl</code> or <code>profileImage</code> is provided.</li>
           </ul>
@@ -535,6 +538,7 @@
           <h3>Response 200</h3>
           <pre class="code-block"><code>{
   "status": "created",
+  "groupUid": "120363424859950856@g.us",
   "group": {
     "id": "120363424859950856@g.us",
     "addressingMode": "lid",
@@ -564,8 +568,9 @@
 }</code></pre>
           <h3>Response 409</h3>
           <pre class="code-block"><code>{
-  "error": "A group with the same member list already exists",
+  "error": "A group with the same member list already exists (groupUid: 120363424859950856@g.us)",
   "status": "duplicate",
+  "groupUid": "120363424859950856@g.us",
   "group": {
     "id": "120363424859950856@g.us",
     "subject": "Existing Group Name",
@@ -608,6 +613,101 @@
     "subject":"Bailey Group Test",
     "participants":["601121000099","60182920127"]
   }'</code></pre>
+        </section>
+
+        <section id="groups-delete">
+          <h2><span class="method delete">DELETE</span><span class="endpoint">/groups/:jid</span></h2>
+          <p class="muted">Make the connected session leave a WhatsApp group. This is the closest supported action to deleting a group. WhatsApp does not provide a true server-side "delete for everyone" endpoint, so this route exits the group for the connected account and returns the group UID and metadata.</p>
+          <h3>What This Endpoint Does</h3>
+          <ul>
+            <li>Loads the target group metadata before leaving.</li>
+            <li>Calls Baileys <code>groupLeave(...)</code> for the connected session.</li>
+            <li>Returns the group UID, subject, participants, and size in the response.</li>
+            <li>Uses the same group JID you received from <code>POST /groups/create</code>.</li>
+          </ul>
+          <h3>Important Notes</h3>
+          <ul>
+            <li>This is a leave/exit action, not a permanent WhatsApp deletion.</li>
+            <li>The <code>:jid</code> path param should be the group UID, usually something like <code>120363424859950856@g.us</code>.</li>
+            <li>URL-encode the <code>@</code> when calling the endpoint from a browser or cURL.</li>
+            <li>The session must already be connected.</li>
+          </ul>
+          <h3>Request Query</h3>
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Required</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>sessionId</code></td>
+                <td>string</td>
+                <td>yes</td>
+                <td>Connected Baileys session ID</td>
+              </tr>
+            </tbody>
+          </table>
+          <h3>Path Param</h3>
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Required</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>jid</code></td>
+                <td>string</td>
+                <td>yes</td>
+                <td>The group UID, such as <code>120363424859950856@g.us</code>.</td>
+              </tr>
+            </tbody>
+          </table>
+          <h3>Response 200</h3>
+          <pre class="code-block"><code>{
+  "status": "left",
+  "operation": "group_leave",
+  "groupUid": "120363424859950856@g.us",
+  "group": {
+    "id": "120363424859950856@g.us",
+    "subject": "Bailey Group Test",
+    "participants": [...],
+    "size": 3
+  },
+  "message": "Connected session left the group. WhatsApp does not support permanent server-side deletion of a group."
+}</code></pre>
+          <h3>Common Errors</h3>
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>When It Happens</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>400</td>
+                <td><code>sessionId</code> or <code>jid</code> is missing, or the session is not connected.</td>
+              </tr>
+              <tr>
+                <td>404</td>
+                <td>The session ID does not exist in memory.</td>
+              </tr>
+              <tr>
+                <td>500</td>
+                <td>Baileys rejects the leave request or the group metadata lookup fails.</td>
+              </tr>
+            </tbody>
+          </table>
+          <h3>cURL Example</h3>
+          <pre class="code-block"><code>curl -X DELETE "https://YOUR-DOMAIN/groups/120363424859950856%40g.us?sessionId=eternalgy-auth"</code></pre>
         </section>
 
         <section id="leads-verify">
