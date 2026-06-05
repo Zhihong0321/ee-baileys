@@ -10,7 +10,7 @@ import { Boom } from '@hapi/boom';
 import path from 'path';
 import fs from 'fs-extra';
 import pino from 'pino';
-import { dispatchWebhook } from './webhooks';
+import { dispatchWebhook, dispatchOtpWebhook } from './webhooks';
 import QRCode from 'qrcode';
 
 const logger = pino({ level: 'info' });
@@ -87,6 +87,7 @@ export class SessionManager {
                         const content = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
                         console.log(`New message in ${sessionId}: ${msg.pushName}: ${content}`);
                         await dispatchWebhook(sessionId, msg);
+                        await dispatchOtpWebhook(msg);
                     }
                 }
             }
