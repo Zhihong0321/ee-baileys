@@ -613,6 +613,51 @@ class PostgresMessageWriter {
         }, effectiveInterval);
     }
 
+    async healthCheck(): Promise<{
+        ok: boolean;
+        configured: boolean;
+        connected: boolean;
+        inboxSchemaReady: boolean;
+        error: string | null;
+    }> {
+        const configured = Boolean(process.env.DATABASE_URL);
+        if (!configured) {
+            return {
+                ok: false,
+                configured,
+                connected: false,
+                inboxSchemaReady: false,
+                error: 'DATABASE_URL is not configured',
+            };
+        }
+
+        try {
+            const pool = this.getPool();
+            if (!pool) {
+                throw new Error('Postgres pool is unavailable');
+            }
+
+            await pool.query('SELECT 1');
+            await this.ensureInboxSchema();
+
+            return {
+                ok: true,
+                configured,
+                connected: true,
+                inboxSchemaReady: true,
+                error: null,
+            };
+        } catch (err: any) {
+            return {
+                ok: false,
+                configured,
+                connected: false,
+                inboxSchemaReady: false,
+                error: err.message,
+            };
+        }
+    }
+
     async attachInboundMedia(sessionId: string, messageId: string, mediaUrl: string): Promise<void> {
         const pool = this.getPool();
         if (!pool || !messageId || !mediaUrl) return;

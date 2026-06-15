@@ -5,6 +5,7 @@ import { manager } from '../whatsapp/SocketManager';
 import QRCode from 'qrcode';
 import { postgresMessageWriter } from '../db/PostgresMessageWriter';
 import { WhatsAppInstance } from '../whatsapp/Instance';
+import { buildHealthReport } from '../health';
 
 const app = express();
 app.use(express.json());
@@ -39,7 +40,19 @@ app.get('/api', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-    res.json({ status: 'ok' });
+    buildHealthReport()
+        .then(report => res.status(report.ok ? 200 : 503).json(report))
+        .catch((err: any) => res.status(500).json({
+            ok: false,
+            status: 'error',
+            checkedAt: new Date().toISOString(),
+            service: 'baileys-multi-api',
+            error: err.message,
+        }));
+});
+
+app.get('/full-health', (req, res) => {
+    res.sendFile(path.join(publicDir, 'full-health.html'));
 });
 
 const buildSessionResponse = async (sessionId: string, instance: WhatsAppInstance) => {
