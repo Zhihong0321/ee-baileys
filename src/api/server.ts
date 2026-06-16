@@ -13,6 +13,7 @@ import {
     setSessionWebhookConfig,
 } from '../utils/webhook';
 import { buildHealthReport } from '../health';
+import { MEDIA_BASE_DIR } from '../config/paths';
 
 const app = express();
 app.use(express.json());
@@ -22,8 +23,7 @@ const publicDir = path.join(process.cwd(), 'public');
 app.use(express.static(publicDir));
 
 // Serve downloaded media files (voice notes, etc.)
-const mediaDir = path.join(process.cwd(), 'media');
-app.use('/media', express.static(mediaDir));
+app.use('/media', express.static(MEDIA_BASE_DIR));
 
 // Basic API info/health endpoints
 app.get('/api', (req, res) => {
@@ -84,7 +84,8 @@ const buildSessionResponse = async (sessionId: string, instance: WhatsAppInstanc
         status: isConnected ? 'connected' : 'initializing',
         qr: qr || null,
         qrImage,
-        error: instance.lastError || null,
+        error: isConnected ? null : (instance.lastError || null),
+        lastError: instance.lastError || null,
         message: qr ? 'Scan code' : (isConnected ? 'Connected' : (instance.lastError ? 'Error occurred' : 'Waiting for connection update')),
         connectedNumber: instance.getConnectedNumber(),
         me,

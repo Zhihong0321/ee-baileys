@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { manager } from './whatsapp/SocketManager';
-import { SESSIONS_BASE_DIR } from './config/paths';
+import { MEDIA_BASE_DIR, SESSIONS_BASE_DIR, STORAGE_BASE_DIR } from './config/paths';
 import { postgresMessageWriter } from './db/PostgresMessageWriter';
 
 type StatHealth = {
@@ -17,7 +17,6 @@ type StatHealth = {
 
 const ROOT = process.cwd();
 const PUBLIC_DIR = path.join(ROOT, 'public');
-const MEDIA_DIR = path.join(ROOT, 'media');
 
 function canAccess(targetPath: string, mode: number): boolean {
     try {
@@ -69,7 +68,9 @@ function checkRuntime() {
             railway: Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_PUBLIC_DOMAIN),
             railwayEnvironment: process.env.RAILWAY_ENVIRONMENT || null,
             mediaBaseUrlConfigured: Boolean(process.env.MEDIA_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || process.env.RAILWAY_STATIC_URL),
+            storageBaseDir: STORAGE_BASE_DIR,
             sessionsBaseDir: SESSIONS_BASE_DIR,
+            mediaBaseDir: MEDIA_BASE_DIR,
             databaseUrlConfigured: Boolean(process.env.DATABASE_URL),
         },
     };
@@ -79,12 +80,14 @@ function checkStorage() {
     const checks = {
         root: safeStat(ROOT),
         public: safeStat(PUBLIC_DIR),
+        storage: safeStat(STORAGE_BASE_DIR),
         sessions: safeStat(SESSIONS_BASE_DIR),
-        media: safeStat(MEDIA_DIR),
+        media: safeStat(MEDIA_BASE_DIR),
     };
     const usable = {
         root: checks.root.exists && checks.root.writable,
         public: checks.public.exists && checks.public.readable,
+        storage: checks.storage.exists ? checks.storage.writable : checks.storage.parentWritable,
         sessions: checks.sessions.exists ? checks.sessions.writable : checks.sessions.parentWritable,
         media: checks.media.exists ? checks.media.writable : checks.media.parentWritable,
     };
@@ -101,23 +104,27 @@ function checkSessions() {
         const instance = manager.getExistingInstance(sessionId);
         const connected = Boolean(instance?.sock?.user);
         const hasQr = Boolean(instance?.getQRCode());
+        const lastError = instance?.lastError || null;
+        const activeError = !connected && lastError ? lastError : null;
         return {
             sessionId,
             status: connected ? 'connected' : (hasQr ? 'qr_pending' : 'initializing_or_disconnected'),
             connected,
             connectedNumber: instance?.getConnectedNumber() || null,
             hasQr,
-            lastError: instance?.lastError || null,
+            lastError,
+            activeError,
             sessionPath: safeStat(path.join(SESSIONS_BASE_DIR, sessionId)),
         };
     });
 
     return {
-        ok: details.every((item) => !item.lastError),
+        ok: details.every((item) => !item.activeError),
         count: sessionIds.length,
         connected: details.filter((item) => item.connected).length,
         qrPending: details.filter((item) => item.hasQr).length,
-        errorCount: details.filter((item) => item.lastError).length,
+        errorCount: details.filter((item) => item.activeError).length,
+        staleErrorCount: details.filter((item) => item.connected && item.lastError).length,
         details,
     };
 }

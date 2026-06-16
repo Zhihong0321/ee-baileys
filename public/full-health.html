@@ -80,10 +80,13 @@
         ])}</article>`,
         `<article class="health-card"><div class="health-title"><h2>Storage</h2>${badge(storage.ok)}</div>${kv([
           ['Root writable', bool(storage.usable.root)],
+          ['Storage usable', bool(storage.usable.storage)],
           ['Public readable', bool(storage.usable.public)],
           ['Sessions usable', bool(storage.usable.sessions)],
           ['Media usable', bool(storage.usable.media)],
+          ['Storage path', runtime.env.storageBaseDir],
           ['Sessions path', runtime.env.sessionsBaseDir],
+          ['Media path', runtime.env.mediaBaseDir],
         ])}</article>`,
         `<article class="health-card"><div class="health-title"><h2>Postgres</h2>${badge(postgres.ok)}</div>${kv([
           ['Configured', bool(postgres.configured)],

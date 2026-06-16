@@ -18,7 +18,7 @@ import { dispatchSessionWebhook, dispatchWebhook, formatMessage } from '../utils
 import { Mutex } from 'async-mutex';
 import QRCode from 'qrcode';
 import { postgresMessageWriter } from '../db/PostgresMessageWriter';
-import { resolveSessionPath } from '../config/paths';
+import { MEDIA_BASE_DIR, resolveSessionPath } from '../config/paths';
 
 const logger = pino({ level: 'info' });
 
@@ -142,6 +142,7 @@ export class WhatsAppInstance {
                 } else if (connection === 'open') {
                     console.log(`[${this.sessionId}] Connection active`);
                     this.qr = undefined;
+                    this.lastError = undefined;
                     dispatchWebhook({ sessionId: this.sessionId, event: 'connection', data: { status: 'open' } });
                 }
             });
@@ -588,7 +589,7 @@ export class WhatsAppInstance {
             );
 
             const fileName = this.buildMediaFileName(msg.key?.id, mediaMeta.originalFileName, mediaMeta.defaultExt, mediaMeta.mimeType);
-            const mediaDir = path.join(process.cwd(), 'media', mediaMeta.kind);
+            const mediaDir = path.join(MEDIA_BASE_DIR, mediaMeta.kind);
             await fs.ensureDir(mediaDir);
 
             const filePath = path.join(mediaDir, fileName);

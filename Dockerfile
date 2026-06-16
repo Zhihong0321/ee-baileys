@@ -24,8 +24,8 @@ COPY . .
 # Build the TypeScript project
 RUN npm run build
 
-# Create sessions directory (this will be used for the Railway volume)
-RUN mkdir -p sessions
+# Create local fallback directories. On Railway, mount persistent storage at /storage.
+RUN mkdir -p sessions media
 
 # Expose the port (Railway will provide this via PORT env)
 EXPOSE 3000

@@ -37,9 +37,19 @@ function setStatus(text, ok = true) {
 
 async function checkServer() {
   try {
-    const res = await fetch('/health');
-    if (!res.ok) throw new Error('Server not ready');
-    setStatus('Server online');
+    const res = await fetch('/health', { cache: 'no-store' });
+    const report = await res.json().catch(() => null);
+    if (res.ok && report?.ok !== false) {
+      setStatus('Server online');
+      return;
+    }
+
+    if (report?.status) {
+      setStatus(`Server ${report.status}`, false);
+      return;
+    }
+
+    setStatus(`Server HTTP ${res.status}`, false);
   } catch (err) {
     setStatus('Server offline', false);
   }
