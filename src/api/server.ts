@@ -176,6 +176,7 @@ app.get('/api', (req, res) => {
             'GET /sessions/:id',
             'GET /sessions/:id/qr',
             'POST /messages/send',
+            'POST /webhooks/message',
             'POST /simulate/inbound',
             'POST /groups/create',
             'DELETE /groups/:jid?sessionId=...',
@@ -421,6 +422,86 @@ app.post('/messages/send', async (req, res) => {
         res.json({ status: 'sent', result });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
+    }
+});
+
+const parseWebhookDestination = (value: unknown): string | null => {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+
+    try {
+        const parsed = new URL(raw);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            return null;
+        }
+        return parsed.toString();
+    } catch {
+        return null;
+    }
+};
+
+app.post('/webhooks/message', async (req, res) => {
+    const sessionId = String(req.body?.sessionId || '').trim();
+    const messageId = String(req.body?.messageId || '').trim();
+    const webhookUrl = parseWebhookDestination(req.body?.webhookUrl || req.body?.url);
+
+    if (!sessionId || !messageId || !webhookUrl) {
+        return res.status(400).json({
+            error: 'Missing or invalid required fields: sessionId, webhookUrl, messageId',
+        });
+    }
+
+    try {
+        const storedMessage = await postgresMessageWriter.findMessageForWebhook(sessionId, messageId);
+        const cachedMessage = storedMessage ? null : manager.getExistingInstance(sessionId)?.findCachedMessageById(messageId);
+        const message = storedMessage || cachedMessage;
+
+        if (!message) {
+            return res.status(404).json({
+                error: 'Message not found for sessionId and messageId',
+                sessionId,
+                messageId,
+            });
+        }
+
+        const payload = {
+            sessionId,
+            messageId,
+            event: 'message',
+            dispatchedAt: new Date().toISOString(),
+            message,
+        };
+
+        const webhookResponse = await axios.post(webhookUrl, payload, {
+            timeout: 10000,
+            validateStatus: () => true,
+        });
+
+        const delivered = webhookResponse.status >= 200 && webhookResponse.status < 300;
+        if (!delivered) {
+            return res.status(502).json({
+                status: 'failed',
+                sessionId,
+                messageId,
+                webhookUrl,
+                webhookStatus: webhookResponse.status,
+                webhookStatusText: webhookResponse.statusText,
+                payload,
+            });
+        }
+
+        console.log(`[Webhook] Manual message dispatch succeeded for ${sessionId}/${messageId} -> ${webhookUrl}`);
+        return res.json({
+            status: 'sent',
+            sessionId,
+            messageId,
+            webhookUrl,
+            webhookStatus: webhookResponse.status,
+            payload,
+        });
+    } catch (err: any) {
+        console.error(`[Webhook] Manual message dispatch failed for ${sessionId}/${messageId}: ${err.message}`);
+        return res.status(500).json({ error: err.message });
     }
 });
 

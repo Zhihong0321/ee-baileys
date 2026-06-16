@@ -33,6 +33,26 @@ interface InboundInboxRow {
     last_error: string | null;
 }
 
+export interface StoredWebhookMessage {
+    source: 'et_messages' | 'wa_inbound_inbox';
+    sessionId: string;
+    messageId: string;
+    direction?: string | null;
+    messageType?: string | null;
+    textContent?: string | null;
+    mediaUrl?: string | null;
+    senderPhone?: string | null;
+    recipientPhone?: string | null;
+    deliveryStatus?: string | null;
+    createdAt?: string | null;
+    rawPayload?: any;
+    inbox?: {
+        processStatus: string;
+        processAttempts: number;
+        lastError: string | null;
+    };
+}
+
 class PostgresMessageWriter {
     private pool?: PgPool;
     private sessionCache = new Map<string, SessionInfo | null>();
@@ -802,6 +822,94 @@ class PostgresMessageWriter {
             inbox: inboxResult.rows[0] || null,
             message: storedMessage,
             triggerWorked: !!storedMessage?.thread_id,
+        };
+    }
+
+    async findMessageForWebhook(sessionId: string, messageId: string): Promise<StoredWebhookMessage | null> {
+        const pool = this.getPool();
+        if (!pool) return null;
+
+        const etMessageResult = await pool.query(`
+            SELECT
+                m.external_message_id,
+                m.direction,
+                m.message_type,
+                m.text_content,
+                m.media_url,
+                m.raw_payload,
+                m.delivery_status,
+                m.sender_phone,
+                m.recipient_phone,
+                m.created_at
+            FROM et_messages m
+            INNER JOIN et_channel_sessions s
+                ON s.id = m.channel_session_id
+               AND s.tenant_id = m.tenant_id
+               AND s.channel_type = 'WHATSAPP'
+            WHERE s.session_identifier = $1
+              AND m.channel = 'whatsapp'
+              AND m.external_message_id = $2
+            LIMIT 1
+        `, [sessionId, messageId]);
+
+        if (etMessageResult.rows.length > 0) {
+            const row = etMessageResult.rows[0];
+            return {
+                source: 'et_messages',
+                sessionId,
+                messageId: row.external_message_id,
+                direction: row.direction,
+                messageType: row.message_type,
+                textContent: row.text_content,
+                mediaUrl: row.media_url,
+                senderPhone: row.sender_phone,
+                recipientPhone: row.recipient_phone,
+                deliveryStatus: row.delivery_status,
+                createdAt: row.created_at?.toISOString?.() || row.created_at || null,
+                rawPayload: row.raw_payload,
+            };
+        }
+
+        await this.ensureInboxSchema();
+        const inboxResult = await pool.query(`
+            SELECT
+                external_message_id,
+                message_type,
+                raw_payload,
+                media_url,
+                sender_phone,
+                recipient_phone,
+                process_status,
+                process_attempts,
+                last_error,
+                created_at
+            FROM wa_inbound_inbox
+            WHERE session_identifier = $1
+              AND external_message_id = $2
+            LIMIT 1
+        `, [sessionId, messageId]);
+
+        if (inboxResult.rows.length === 0) {
+            return null;
+        }
+
+        const row = inboxResult.rows[0];
+        return {
+            source: 'wa_inbound_inbox',
+            sessionId,
+            messageId: row.external_message_id,
+            direction: 'inbound',
+            messageType: row.message_type,
+            mediaUrl: row.media_url,
+            senderPhone: row.sender_phone,
+            recipientPhone: row.recipient_phone,
+            createdAt: row.created_at?.toISOString?.() || row.created_at || null,
+            rawPayload: row.raw_payload,
+            inbox: {
+                processStatus: row.process_status,
+                processAttempts: row.process_attempts,
+                lastError: row.last_error,
+            },
         };
     }
 

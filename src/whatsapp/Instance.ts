@@ -453,6 +453,31 @@ export class WhatsAppInstance {
         }));
     }
 
+    findCachedMessageById(messageId: string) {
+        const target = String(messageId || '').trim();
+        if (!target) return null;
+
+        for (const [jid, messages] of this.messagesByChat.entries()) {
+            const msg = messages.get(target);
+            if (!msg) continue;
+
+            return {
+                source: 'memory_cache',
+                sessionId: this.sessionId,
+                messageId: target,
+                jid,
+                phoneNumber: this.extractPhoneNumber(jid),
+                fromMe: !!msg.key?.fromMe,
+                timestamp: this.messageTimestampMs(msg),
+                messageType: msg.message ? Object.keys(msg.message)[0] : 'unknown',
+                textContent: this.extractMessageText(msg),
+                rawPayload: msg,
+            };
+        }
+
+        return null;
+    }
+
     private upsertChats(chats: any[]) {
         for (const chat of chats || []) {
             const jid = this.resolveChatJid(chat);
