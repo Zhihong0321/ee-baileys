@@ -658,6 +658,46 @@ class PostgresMessageWriter {
         }
     }
 
+    async listWhatsAppChannelSessions(): Promise<Array<{
+        sessionId: string;
+        connectedNumber: string | null;
+        updatedAt: string | null;
+    }>> {
+        const pool = this.getPool();
+        if (!pool) return [];
+
+        try {
+            const result = await pool.query(`
+                SELECT
+                    session_identifier,
+                    COALESCE(
+                        metadata->'last_refresh_response'->>'connectedNumber',
+                        metadata->'last_connect_response'->>'connectedNumber',
+                        metadata->'last_refresh_response'->'me'->>'phone',
+                        metadata->'last_connect_response'->'me'->>'phone'
+                    ) AS connected_number,
+                    updated_at
+                FROM et_channel_sessions
+                WHERE channel_type = 'WHATSAPP'
+                  AND session_identifier IS NOT NULL
+                ORDER BY updated_at DESC NULLS LAST, id DESC
+            `);
+
+            return result.rows
+                .filter(row => typeof row.session_identifier === 'string' && row.session_identifier.trim())
+                .map(row => ({
+                    sessionId: row.session_identifier,
+                    connectedNumber: typeof row.connected_number === 'string' && row.connected_number.trim()
+                        ? row.connected_number.trim()
+                        : null,
+                    updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+                }));
+        } catch (err: any) {
+            console.error(`[Postgres] Failed listing WhatsApp channel sessions: ${err.message}`);
+            return [];
+        }
+    }
+
     async attachInboundMedia(sessionId: string, messageId: string, mediaUrl: string): Promise<void> {
         const pool = this.getPool();
         if (!pool || !messageId || !mediaUrl) return;

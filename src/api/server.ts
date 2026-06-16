@@ -106,12 +106,42 @@ app.post('/sessions/:id', async (req, res) => {
 // List
 app.get('/sessions', async (req, res) => {
     try {
-        const sessions = manager.listInstances();
+        const runtimeSessions = manager.listInstances();
+        const storedSessions = await postgresMessageWriter.listWhatsAppChannelSessions();
+        const storedById = new Map(storedSessions.map(session => [session.sessionId, session]));
+        const sessions = Array.from(new Set([
+            ...runtimeSessions,
+            ...storedSessions.map(session => session.sessionId),
+        ]));
+
         const sessionDetails = await Promise.all(
             sessions.map(async (sessionId) => {
                 const instance = manager.getExistingInstance(sessionId);
-                if (!instance) return null;
-                return buildSessionResponse(sessionId, instance);
+                const stored = storedById.get(sessionId);
+                if (instance) {
+                    return {
+                        ...(await buildSessionResponse(sessionId, instance)),
+                        source: 'runtime',
+                        storedConnectedNumber: stored?.connectedNumber || null,
+                        storedUpdatedAt: stored?.updatedAt || null,
+                    };
+                }
+
+                return {
+                    sessionId,
+                    status: 'saved_not_loaded',
+                    qr: null,
+                    qrImage: null,
+                    error: null,
+                    lastError: null,
+                    message: 'Saved session record; Baileys auth is not loaded',
+                    connectedNumber: null,
+                    storedConnectedNumber: stored?.connectedNumber || null,
+                    me: null,
+                    webhook: await getSessionWebhookConfig(sessionId),
+                    source: 'database',
+                    storedUpdatedAt: stored?.updatedAt || null,
+                };
             })
         );
 

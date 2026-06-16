@@ -97,10 +97,15 @@ function useSession(session) {
   simSessionIdEl.value = session.sessionId;
   webhookSessionIdEl.value = session.sessionId;
   webhookUrlEl.value = session.webhook?.webhookUrl || '';
-  simRecipientPhoneEl.value = session.connectedNumber || '';
-  sessionStatus.textContent = session.connectedNumber
+  simRecipientPhoneEl.value = session.connectedNumber || session.storedConnectedNumber || '';
+  sessionStatus.textContent = session.qr
+    ? 'Scan this QR code'
+    : session.connectedNumber
     ? `Connected number: ${session.connectedNumber}`
+    : session.storedConnectedNumber
+    ? `Saved number: ${session.storedConnectedNumber}`
     : `Session ID: ${session.sessionId}`;
+  renderQr(session.qr, session.qrImage);
 }
 
 async function initSession() {
@@ -310,15 +315,19 @@ async function refreshSessions() {
 
       const label = document.createElement('span');
       label.className = 'session-label';
-      label.textContent = session.connectedNumber || session.sessionId;
+      label.textContent = session.connectedNumber || session.storedConnectedNumber || session.sessionId;
       labelWrap.appendChild(label);
 
-      if (session.connectedNumber && session.connectedNumber !== session.sessionId) {
-        const subtitle = document.createElement('span');
-        subtitle.className = 'session-subtitle muted';
-        subtitle.textContent = `Session ID: ${session.sessionId}`;
-        labelWrap.appendChild(subtitle);
-      }
+      const statusSubtitle = document.createElement('span');
+      statusSubtitle.className = session.connectedNumber ? 'session-subtitle webhook-set' : 'session-subtitle muted';
+      statusSubtitle.textContent = session.connectedNumber
+        ? `Connected · Session ID: ${session.sessionId}`
+        : session.qr
+        ? `QR pending · Session ID: ${session.sessionId}`
+        : session.storedConnectedNumber
+        ? `Saved, not connected · Session ID: ${session.sessionId}`
+        : `${session.status || 'not connected'} · Session ID: ${session.sessionId}`;
+      labelWrap.appendChild(statusSubtitle);
 
       const webhookSubtitle = document.createElement('span');
       webhookSubtitle.className = session.webhook?.webhookUrl ? 'session-subtitle webhook-set' : 'session-subtitle muted';
