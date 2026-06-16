@@ -46,6 +46,27 @@
     </section>
 
     <section class="card">
+      <h2>Session Webhook</h2>
+      <p class="muted">Set where incoming messages for one session are sent automatically.</p>
+      <div class="grid">
+        <label class="field">
+          <span>Session ID</span>
+          <input id="webhookSessionId" type="text" placeholder="agent-01" />
+        </label>
+        <label class="field field-span-2">
+          <span>Webhook URL</span>
+          <input id="webhookUrl" type="url" placeholder="https://example.com/whatsapp/inbound" />
+        </label>
+        <div class="actions">
+          <button id="saveWebhook">Save Webhook</button>
+          <button id="loadWebhook" class="ghost">Load Current</button>
+          <button id="deleteWebhook" class="danger">Remove Webhook</button>
+        </div>
+      </div>
+      <pre class="log" id="webhookLog"></pre>
+    </section>
+
+    <section class="card">
       <h2>Send Message</h2>
       <div class="grid">
         <label class="field">

@@ -6,6 +6,13 @@ const deleteSessionBtn = document.getElementById('deleteSession');
 const qrBox = document.getElementById('qrBox');
 const sessionStatus = document.getElementById('sessionStatus');
 
+const webhookSessionIdEl = document.getElementById('webhookSessionId');
+const webhookUrlEl = document.getElementById('webhookUrl');
+const saveWebhookBtn = document.getElementById('saveWebhook');
+const loadWebhookBtn = document.getElementById('loadWebhook');
+const deleteWebhookBtn = document.getElementById('deleteWebhook');
+const webhookLog = document.getElementById('webhookLog');
+
 const msgSessionIdEl = document.getElementById('msgSessionId');
 const msgToEl = document.getElementById('msgTo');
 const msgTextEl = document.getElementById('msgText');
@@ -70,6 +77,22 @@ function renderQr(qr, qrImage) {
   }
 }
 
+function setWebhookLog(value) {
+  webhookLog.textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+}
+
+function useSession(session) {
+  sessionIdEl.value = session.sessionId;
+  msgSessionIdEl.value = session.sessionId;
+  simSessionIdEl.value = session.sessionId;
+  webhookSessionIdEl.value = session.sessionId;
+  webhookUrlEl.value = session.webhook?.webhookUrl || '';
+  simRecipientPhoneEl.value = session.connectedNumber || '';
+  sessionStatus.textContent = session.connectedNumber
+    ? `Connected number: ${session.connectedNumber}`
+    : `Session ID: ${session.sessionId}`;
+}
+
 async function initSession() {
   const sessionId = sessionIdEl.value.trim();
   if (!sessionId) return alert('Enter a session ID');
@@ -86,10 +109,72 @@ async function initSession() {
     sessionStatus.textContent = data.message || data.status;
     renderQr(data.qr, data.qrImage);
     msgSessionIdEl.value = sessionId;
+    webhookSessionIdEl.value = sessionId;
+    webhookUrlEl.value = data.webhook?.webhookUrl || webhookUrlEl.value;
     await refreshSessions();
   } catch (err) {
     sessionStatus.textContent = err.message;
     renderQr(null);
+  }
+}
+
+async function saveWebhook() {
+  const sessionId = webhookSessionIdEl.value.trim();
+  const webhookUrl = webhookUrlEl.value.trim();
+  if (!sessionId) return alert('Enter a session ID');
+  if (!webhookUrl) return alert('Enter a webhook URL');
+
+  setWebhookLog('Saving webhook...');
+  try {
+    const res = await fetch(`/sessions/${encodeURIComponent(sessionId)}/webhook`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ webhookUrl })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to save webhook');
+    webhookUrlEl.value = data.webhookUrl || webhookUrl;
+    setWebhookLog(data);
+    await refreshSessions();
+  } catch (err) {
+    setWebhookLog(err.message);
+  }
+}
+
+async function loadWebhook() {
+  const sessionId = webhookSessionIdEl.value.trim();
+  if (!sessionId) return alert('Enter a session ID');
+
+  setWebhookLog('Loading webhook...');
+  try {
+    const res = await fetch(`/sessions/${encodeURIComponent(sessionId)}/webhook`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Webhook not configured');
+    webhookUrlEl.value = data.webhookUrl || '';
+    setWebhookLog(data);
+  } catch (err) {
+    webhookUrlEl.value = '';
+    setWebhookLog(err.message);
+  }
+}
+
+async function deleteWebhook() {
+  const sessionId = webhookSessionIdEl.value.trim();
+  if (!sessionId) return alert('Enter a session ID');
+  if (!confirm(`Remove webhook for session ${sessionId}?`)) return;
+
+  setWebhookLog('Removing webhook...');
+  try {
+    const res = await fetch(`/sessions/${encodeURIComponent(sessionId)}/webhook`, {
+      method: 'DELETE'
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to remove webhook');
+    webhookUrlEl.value = '';
+    setWebhookLog(data);
+    await refreshSessions();
+  } catch (err) {
+    setWebhookLog(err.message);
   }
 }
 
@@ -225,19 +310,20 @@ async function refreshSessions() {
         labelWrap.appendChild(subtitle);
       }
 
+      const webhookSubtitle = document.createElement('span');
+      webhookSubtitle.className = session.webhook?.webhookUrl ? 'session-subtitle webhook-set' : 'session-subtitle muted';
+      webhookSubtitle.textContent = session.webhook?.webhookUrl
+        ? `Webhook: ${session.webhook.webhookUrl}`
+        : 'Webhook: not set';
+      labelWrap.appendChild(webhookSubtitle);
+
       li.appendChild(labelWrap);
 
       const btn = document.createElement('button');
       btn.className = 'ghost';
       btn.textContent = 'Use';
       btn.onclick = () => {
-        sessionIdEl.value = session.sessionId;
-        msgSessionIdEl.value = session.sessionId;
-        simSessionIdEl.value = session.sessionId;
-        simRecipientPhoneEl.value = session.connectedNumber || '';
-        sessionStatus.textContent = session.connectedNumber
-          ? `Connected number: ${session.connectedNumber}`
-          : `Session ID: ${session.sessionId}`;
+        useSession(session);
       };
       li.appendChild(btn);
 
@@ -279,6 +365,9 @@ refreshQrBtn.addEventListener('click', refreshQr);
 deleteSessionBtn.addEventListener('click', deleteSession);
 sendMessageBtn.addEventListener('click', sendMessage);
 simulateInboundBtn.addEventListener('click', simulateInbound);
+saveWebhookBtn.addEventListener('click', saveWebhook);
+loadWebhookBtn.addEventListener('click', loadWebhook);
+deleteWebhookBtn.addEventListener('click', deleteWebhook);
 refreshSessionsBtn.addEventListener('click', refreshSessions);
 
 checkServer();

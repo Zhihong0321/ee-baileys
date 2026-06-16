@@ -205,6 +205,11 @@ button.danger {
 
 .session-subtitle {
   font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.webhook-set {
+  color: var(--accent-2);
 }
 
 .log {
