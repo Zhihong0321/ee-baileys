@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Baileys Full Health</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    .health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }
+    .health-card { background: #0b1117; border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+    .health-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+    .health-title h2 { margin: 0; }
+    .badge { border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .badge.ok { background: #143d2a; color: #86efac; }
+    .badge.bad { background: #4a161b; color: #fca5a5; }
+    .kv { display: grid; gap: 6px; margin: 0; }
+    .kv div { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+    .kv dt { color: var(--muted); }
+    .kv dd { margin: 0; text-align: right; word-break: break-word; }
+    .raw { max-height: 460px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Baileys Multi-API</p>
+        <h1>Full Health</h1>
+        <p class="subtitle">Runtime, Railway, storage, Postgres, sessions, and route coverage in one place.</p>
+        <p class="subtitle"><a class="doc-link" href="/">Back to Dashboard</a></p>
+      </div>
+      <div class="status-pill" id="overall">Checking server...</div>
+    </header>
+
+    <section class="health-grid" id="cards"></section>
+
+    <section class="card">
+      <div class="actions">
+        <button id="refresh">Refresh</button>
+      </div>
+      <pre class="log raw" id="raw"></pre>
+    </section>
+  </main>
+
+  <script>
+    const cards = document.getElementById('cards');
+    const raw = document.getElementById('raw');
+    const overall = document.getElementById('overall');
+    const refresh = document.getElementById('refresh');
+
+    function badge(ok) {
+      return `<span class="badge ${ok ? 'ok' : 'bad'}">${ok ? 'OK' : 'CHECK'}</span>`;
+    }
+
+    function kv(rows) {
+      return `<dl class="kv">${rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${v ?? '-'}</dd></div>`).join('')}</dl>`;
+    }
+
+    function bool(value) {
+      return value ? 'yes' : 'no';
+    }
+
+    function render(report) {
+      overall.textContent = `${String(report.status || 'unknown').toUpperCase()} · ${new Date(report.checkedAt).toLocaleString()}`;
+      overall.style.color = report.ok ? 'var(--accent-2)' : 'var(--danger)';
+
+      const runtime = report.checks.runtime;
+      const storage = report.checks.storage;
+      const postgres = report.checks.postgres;
+      const sessions = report.checks.sessions;
+      const endpoints = report.checks.endpoints;
+
+      cards.innerHTML = [
+        `<article class="health-card"><div class="health-title"><h2>Runtime</h2>${badge(runtime.ok)}</div>${kv([
+          ['Node', runtime.node],
+          ['Uptime', `${runtime.uptimeSeconds}s`],
+          ['Memory RSS', `${Math.round(runtime.memory.rss / 1024 / 1024)} MB`],
+          ['Railway', bool(runtime.env.railway)],
+          ['Port', runtime.env.port],
+        ])}</article>`,
+        `<article class="health-card"><div class="health-title"><h2>Storage</h2>${badge(storage.ok)}</div>${kv([
+          ['Root writable', bool(storage.usable.root)],
+          ['Public readable', bool(storage.usable.public)],
+          ['Sessions usable', bool(storage.usable.sessions)],
+          ['Media usable', bool(storage.usable.media)],
+          ['Sessions path', runtime.env.sessionsBaseDir],
+        ])}</article>`,
+        `<article class="health-card"><div class="health-title"><h2>Postgres</h2>${badge(postgres.ok)}</div>${kv([
+          ['Configured', bool(postgres.configured)],
+          ['Connected', bool(postgres.connected)],
+          ['Inbox schema', bool(postgres.inboxSchemaReady)],
+          ['Error', postgres.error || '-'],
+        ])}</article>`,
+        `<article class="health-card"><div class="health-title"><h2>Sessions</h2>${badge(sessions.ok)}</div>${kv([
+          ['Total', sessions.count],
+          ['Connected', sessions.connected],
+          ['QR pending', sessions.qrPending],
+          ['Errors', sessions.errorCount],
+        ])}</article>`,
+        `<article class="health-card"><div class="health-title"><h2>Endpoints</h2>${badge(endpoints.ok)}</div>${kv([
+          ['Routes listed', endpoints.routes.length],
+          ['API docs', '/api-docs.html'],
+          ['Health JSON', '/health'],
+          ['Health page', '/full-health'],
+        ])}</article>`,
+      ].join('');
+
+      raw.textContent = JSON.stringify(report, null, 2);
+    }
+
+    async function load() {
+      overall.textContent = 'Checking server...';
+      const res = await fetch('/health', { cache: 'no-store' });
+      const report = await res.json();
+      render(report);
+    }
+
+    refresh.addEventListener('click', load);
+    load().catch((err) => {
+      overall.textContent = 'HEALTH FAILED';
+      overall.style.color = 'var(--danger)';
+      raw.textContent = err.stack || err.message;
+    });
+  </script>
+</body>
+</html>

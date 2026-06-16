@@ -12,154 +12,7 @@ import {
     parseWebhookUrl,
     setSessionWebhookConfig,
 } from '../utils/webhook';
-
-const REQUIRED_DB_SCHEMA: Record<string, string[]> = {
-    et_channel_sessions: [
-        'id',
-        'tenant_id',
-        'channel_type',
-        'session_identifier',
-        'metadata',
-        'updated_at',
-    ],
-    et_leads: [
-        'id',
-        'tenant_id',
-        'external_id',
-        'name',
-        'stage',
-        'whatsapp_lid',
-        'is_whatsapp_valid',
-        'last_verify_at',
-        'created_at',
-    ],
-    et_messages: [
-        'tenant_id',
-        'lead_id',
-        'thread_id',
-        'channel_session_id',
-        'channel',
-        'external_message_id',
-        'direction',
-        'message_type',
-        'text_content',
-        'media_url',
-        'raw_payload',
-        'delivery_status',
-        'sender_phone',
-        'recipient_phone',
-        'created_at',
-        'updated_at',
-    ],
-    wa_inbound_inbox: [
-        'id',
-        'session_identifier',
-        'external_message_id',
-        'sender_jid',
-        'sender_phone',
-        'recipient_phone',
-        'message_type',
-        'raw_payload',
-        'media_url',
-        'process_status',
-        'process_attempts',
-        'last_error',
-        'last_error_at',
-        'processed_at',
-        'locked_at',
-        'created_at',
-        'updated_at',
-    ],
-};
-
-const getBaileysPackageVersion = (): string | null => {
-    try {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        return require('@whiskeysockets/baileys/package.json').version || null;
-    } catch {
-        return null;
-    }
-};
-
-const checkDatabaseSchema = async () => {
-    const databaseUrl = process.env.DATABASE_URL;
-    if (!databaseUrl) {
-        return {
-            status: 'disabled',
-            configured: false,
-            reachable: false,
-            schema: {
-                status: 'not_checked',
-                missing: {},
-            },
-        };
-    }
-
-    let pool: any;
-    try {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { Pool } = require('pg');
-        pool = new Pool({ connectionString: databaseUrl, connectionTimeoutMillis: 3000 });
-        await pool.query('SELECT 1');
-
-        const tableNames = Object.keys(REQUIRED_DB_SCHEMA);
-        const result = await pool.query(
-            `
-                SELECT table_name, column_name
-                FROM information_schema.columns
-                WHERE table_schema = 'public'
-                  AND table_name = ANY($1::text[])
-            `,
-            [tableNames]
-        );
-
-        const existing = new Map<string, Set<string>>();
-        for (const row of result.rows) {
-            const tableName = String(row.table_name);
-            const columnName = String(row.column_name);
-            if (!existing.has(tableName)) existing.set(tableName, new Set());
-            existing.get(tableName)!.add(columnName);
-        }
-
-        const missing: Record<string, string[]> = {};
-        for (const [tableName, columns] of Object.entries(REQUIRED_DB_SCHEMA)) {
-            const existingColumns = existing.get(tableName);
-            const missingColumns = existingColumns
-                ? columns.filter(column => !existingColumns.has(column))
-                : columns;
-
-            if (missingColumns.length > 0) {
-                missing[tableName] = missingColumns;
-            }
-        }
-
-        const schemaOk = Object.keys(missing).length === 0;
-        return {
-            status: schemaOk ? 'pass' : 'fail',
-            configured: true,
-            reachable: true,
-            schema: {
-                status: schemaOk ? 'pass' : 'fail',
-                missing,
-            },
-        };
-    } catch (err: any) {
-        return {
-            status: 'fail',
-            configured: true,
-            reachable: false,
-            error: err?.message || String(err),
-            schema: {
-                status: 'not_checked',
-                missing: {},
-            },
-        };
-    } finally {
-        if (pool) {
-            await pool.end().catch(() => undefined);
-        }
-    }
-};
+import { buildHealthReport } from '../health';
 
 const app = express();
 app.use(express.json());
@@ -196,65 +49,20 @@ app.get('/api', (req, res) => {
     });
 });
 
-app.get('/health', async (req, res) => {
-    const sessions = manager.listInstances();
-    const sessionDetails = sessions
-        .map(sessionId => {
-            const instance = manager.getExistingInstance(sessionId);
-            return {
-                sessionId,
-                connected: !!instance?.sock?.user,
-                hasQr: !!instance?.getQRCode(),
-                error: instance?.lastError || null,
-                connectedNumber: instance?.getConnectedNumber() || null,
-            };
-        });
+app.get('/health', (req, res) => {
+    buildHealthReport()
+        .then(report => res.status(report.ok ? 200 : 503).json(report))
+        .catch((err: any) => res.status(500).json({
+            ok: false,
+            status: 'error',
+            checkedAt: new Date().toISOString(),
+            service: 'baileys-multi-api',
+            error: err.message,
+        }));
+});
 
-    const connectedSessions = sessionDetails.filter(session => session.connected).length;
-    const database = await checkDatabaseSchema();
-    const webhookConfigured = !!process.env.WEBHOOK_URL;
-    const baileysVersion = getBaileysPackageVersion();
-
-    const blockingFailures = [
-        baileysVersion ? null : 'baileys_package_missing',
-        database.status === 'fail' ? 'database' : null,
-    ].filter(Boolean);
-
-    const ready = blockingFailures.length === 0 && connectedSessions > 0;
-    const status = blockingFailures.length > 0
-        ? 'fail'
-        : (ready ? 'ok' : 'degraded');
-
-    const body = {
-        status,
-        ready,
-        service: 'baileys-multi-api',
-        uptimeSeconds: Math.round(process.uptime()),
-        baileys: {
-            version: baileysVersion,
-        },
-        sessions: {
-            total: sessions.length,
-            connected: connectedSessions,
-            details: sessionDetails,
-        },
-        database,
-        webhook: {
-            configured: webhookConfigured,
-            status: webhookConfigured ? 'configured' : 'not_configured',
-        },
-        checks: {
-            process: 'pass',
-            baileys: baileysVersion ? 'pass' : 'fail',
-            sessions: connectedSessions > 0 ? 'pass' : 'warn',
-            database: database.status,
-            webhook: webhookConfigured ? 'pass' : 'warn',
-        },
-        blockingFailures,
-    };
-
-    const strict = String(req.query.strict || '').toLowerCase() === 'true';
-    res.status(strict && !ready ? 503 : 200).json(body);
+app.get('/full-health', (req, res) => {
+    res.sendFile(path.join(publicDir, 'full-health.html'));
 });
 
 const buildSessionResponse = async (sessionId: string, instance: WhatsAppInstance) => {
