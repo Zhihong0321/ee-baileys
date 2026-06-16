@@ -5,6 +5,13 @@ import { manager } from '../whatsapp/SocketManager';
 import QRCode from 'qrcode';
 import { postgresMessageWriter } from '../db/PostgresMessageWriter';
 import { WhatsAppInstance } from '../whatsapp/Instance';
+import {
+    clearSessionWebhookConfig,
+    dispatchSessionWebhook,
+    getSessionWebhookConfig,
+    parseWebhookUrl,
+    setSessionWebhookConfig,
+} from '../utils/webhook';
 
 const REQUIRED_DB_SCHEMA: Record<string, string[]> = {
     et_channel_sessions: [
@@ -175,8 +182,10 @@ app.get('/api', (req, res) => {
             'GET /sessions',
             'GET /sessions/:id',
             'GET /sessions/:id/qr',
+            'PUT /sessions/:id/webhook',
+            'GET /sessions/:id/webhook',
+            'DELETE /sessions/:id/webhook',
             'POST /messages/send',
-            'POST /webhooks/message',
             'POST /simulate/inbound',
             'POST /groups/create',
             'DELETE /groups/:jid?sessionId=...',
@@ -271,6 +280,7 @@ const buildSessionResponse = async (sessionId: string, instance: WhatsAppInstanc
         message: qr ? 'Scan code' : (isConnected ? 'Connected' : (instance.lastError ? 'Error occurred' : 'Waiting for connection update')),
         connectedNumber: instance.getConnectedNumber(),
         me,
+        webhook: await getSessionWebhookConfig(sessionId),
     };
 };
 
@@ -336,6 +346,63 @@ app.get('/sessions/:id/qr', (req, res) => {
     }).catch((err: any) => {
         res.status(500).json({ error: err.message });
     });
+});
+
+// Configure automatic inbound message webhook for one session
+app.put('/sessions/:id/webhook', async (req, res) => {
+    const webhookUrl = parseWebhookUrl(req.body?.webhookUrl || req.body?.url);
+    if (!webhookUrl) {
+        return res.status(400).json({ error: 'Missing or invalid webhookUrl. Use an http:// or https:// URL.' });
+    }
+
+    try {
+        const config = await setSessionWebhookConfig(req.params.id, webhookUrl);
+        res.json({
+            status: 'configured',
+            ...config,
+        });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/sessions/:id/webhook', async (req, res) => {
+    const webhookUrl = parseWebhookUrl(req.body?.webhookUrl || req.body?.url);
+    if (!webhookUrl) {
+        return res.status(400).json({ error: 'Missing or invalid webhookUrl. Use an http:// or https:// URL.' });
+    }
+
+    try {
+        const config = await setSessionWebhookConfig(req.params.id, webhookUrl);
+        res.json({
+            status: 'configured',
+            ...config,
+        });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/sessions/:id/webhook', async (req, res) => {
+    try {
+        const config = await getSessionWebhookConfig(req.params.id);
+        if (!config) {
+            return res.status(404).json({ error: 'Webhook not configured for session', sessionId: req.params.id });
+        }
+
+        res.json(config);
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.delete('/sessions/:id/webhook', async (req, res) => {
+    try {
+        await clearSessionWebhookConfig(req.params.id);
+        res.json({ status: 'deleted', sessionId: req.params.id });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // Send Message (The main endpoint for AI)
@@ -425,86 +492,6 @@ app.post('/messages/send', async (req, res) => {
     }
 });
 
-const parseWebhookDestination = (value: unknown): string | null => {
-    const raw = String(value || '').trim();
-    if (!raw) return null;
-
-    try {
-        const parsed = new URL(raw);
-        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-            return null;
-        }
-        return parsed.toString();
-    } catch {
-        return null;
-    }
-};
-
-app.post('/webhooks/message', async (req, res) => {
-    const sessionId = String(req.body?.sessionId || '').trim();
-    const messageId = String(req.body?.messageId || '').trim();
-    const webhookUrl = parseWebhookDestination(req.body?.webhookUrl || req.body?.url);
-
-    if (!sessionId || !messageId || !webhookUrl) {
-        return res.status(400).json({
-            error: 'Missing or invalid required fields: sessionId, webhookUrl, messageId',
-        });
-    }
-
-    try {
-        const storedMessage = await postgresMessageWriter.findMessageForWebhook(sessionId, messageId);
-        const cachedMessage = storedMessage ? null : manager.getExistingInstance(sessionId)?.findCachedMessageById(messageId);
-        const message = storedMessage || cachedMessage;
-
-        if (!message) {
-            return res.status(404).json({
-                error: 'Message not found for sessionId and messageId',
-                sessionId,
-                messageId,
-            });
-        }
-
-        const payload = {
-            sessionId,
-            messageId,
-            event: 'message',
-            dispatchedAt: new Date().toISOString(),
-            message,
-        };
-
-        const webhookResponse = await axios.post(webhookUrl, payload, {
-            timeout: 10000,
-            validateStatus: () => true,
-        });
-
-        const delivered = webhookResponse.status >= 200 && webhookResponse.status < 300;
-        if (!delivered) {
-            return res.status(502).json({
-                status: 'failed',
-                sessionId,
-                messageId,
-                webhookUrl,
-                webhookStatus: webhookResponse.status,
-                webhookStatusText: webhookResponse.statusText,
-                payload,
-            });
-        }
-
-        console.log(`[Webhook] Manual message dispatch succeeded for ${sessionId}/${messageId} -> ${webhookUrl}`);
-        return res.json({
-            status: 'sent',
-            sessionId,
-            messageId,
-            webhookUrl,
-            webhookStatus: webhookResponse.status,
-            payload,
-        });
-    } catch (err: any) {
-        console.error(`[Webhook] Manual message dispatch failed for ${sessionId}/${messageId}: ${err.message}`);
-        return res.status(500).json({ error: err.message });
-    }
-});
-
 app.post('/simulate/inbound', async (req, res) => {
     const { sessionId, recipientPhone, senderPhone, text, pushName, messageId } = req.body || {};
 
@@ -524,6 +511,22 @@ app.post('/simulate/inbound', async (req, res) => {
             text,
             pushName,
             messageId,
+        });
+
+        dispatchSessionWebhook({
+            sessionId: result.sessionId,
+            event: 'message',
+            data: {
+                id: result.messageId,
+                remoteJid: `${result.senderPhone}@s.whatsapp.net`,
+                pushName,
+                fromMe: false,
+                timestamp: Math.floor(Date.now() / 1000),
+                content: text || null,
+                type: 'text',
+                isGroup: false,
+                mediaUrl: null,
+            },
         });
 
         res.json({

@@ -14,7 +14,7 @@ import path from 'path';
 import fs from 'fs-extra';
 import pino from 'pino';
 import { deduper } from '../lib/Deduper';
-import { dispatchWebhook, formatMessage } from '../utils/webhook';
+import { dispatchSessionWebhook, dispatchWebhook, formatMessage } from '../utils/webhook';
 import { Mutex } from 'async-mutex';
 import QRCode from 'qrcode';
 import { postgresMessageWriter } from '../db/PostgresMessageWriter';
@@ -229,10 +229,16 @@ export class WhatsAppInstance {
                         await postgresMessageWriter.attachInboundMedia(this.sessionId, msg.key.id, mediaUrl);
                     }
 
+                    const webhookMessage = formatMessage(msg, mediaUrl);
                     dispatchWebhook({
                         sessionId: this.sessionId,
                         event: 'message',
-                        data: formatMessage(msg, mediaUrl)
+                        data: webhookMessage
+                    });
+                    dispatchSessionWebhook({
+                        sessionId: this.sessionId,
+                        event: 'message',
+                        data: webhookMessage
                     });
                 }
             });
@@ -451,31 +457,6 @@ export class WhatsAppInstance {
             type: msg.message ? Object.keys(msg.message)[0] : 'unknown',
             content: this.extractMessageText(msg),
         }));
-    }
-
-    findCachedMessageById(messageId: string) {
-        const target = String(messageId || '').trim();
-        if (!target) return null;
-
-        for (const [jid, messages] of this.messagesByChat.entries()) {
-            const msg = messages.get(target);
-            if (!msg) continue;
-
-            return {
-                source: 'memory_cache',
-                sessionId: this.sessionId,
-                messageId: target,
-                jid,
-                phoneNumber: this.extractPhoneNumber(jid),
-                fromMe: !!msg.key?.fromMe,
-                timestamp: this.messageTimestampMs(msg),
-                messageType: msg.message ? Object.keys(msg.message)[0] : 'unknown',
-                textContent: this.extractMessageText(msg),
-                rawPayload: msg,
-            };
-        }
-
-        return null;
     }
 
     private upsertChats(chats: any[]) {
