@@ -125,7 +125,7 @@ class PostgresMessageWriter {
         const sql = `
             SELECT id, tenant_id
             FROM et_channel_sessions
-            WHERE channel_type = 'WHATSAPP'
+            WHERE LOWER(channel_type) = 'whatsapp'
               AND session_identifier = $1
             LIMIT 1
         `;
@@ -678,7 +678,7 @@ class PostgresMessageWriter {
                     ) AS connected_number,
                     updated_at
                 FROM et_channel_sessions
-                WHERE channel_type = 'WHATSAPP'
+                WHERE LOWER(channel_type) = 'whatsapp'
                   AND session_identifier IS NOT NULL
                 ORDER BY updated_at DESC NULLS LAST, id DESC
             `);
@@ -734,7 +734,7 @@ class PostgresMessageWriter {
                 metadata->'last_connect_response'->'me'->>'phone'
             ) AS connected_number
             FROM et_channel_sessions
-            WHERE channel_type = 'WHATSAPP'
+            WHERE LOWER(channel_type) = 'whatsapp'
               AND session_identifier = $1
             LIMIT 1
         `;
@@ -751,7 +751,7 @@ class PostgresMessageWriter {
         const sql = `
             SELECT session_identifier
             FROM et_channel_sessions
-            WHERE channel_type = 'WHATSAPP'
+            WHERE LOWER(channel_type) = 'whatsapp'
               AND regexp_replace(COALESCE(
                     metadata->'last_refresh_response'->>'connectedNumber',
                     metadata->'last_connect_response'->>'connectedNumber',
