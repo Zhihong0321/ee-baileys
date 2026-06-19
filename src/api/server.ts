@@ -7,8 +7,10 @@ import { postgresMessageWriter } from '../db/PostgresMessageWriter';
 import { WhatsAppInstance } from '../whatsapp/Instance';
 import {
     clearSessionWebhookConfig,
+    dispatchWebhook,
     dispatchSessionWebhook,
     getSessionWebhookConfig,
+    formatMessage,
     parseWebhookUrl,
     setSessionWebhookConfig,
 } from '../utils/webhook';
@@ -343,29 +345,39 @@ app.post('/simulate/inbound', async (req, res) => {
     }
 
     try {
+        const simulatedText = String(text || '').trim() || `Simulation inbound message at ${new Date().toISOString()}`;
+        const simulatedPushName = String(pushName || '').trim() || `Simulator ${String(senderPhone || '').replace(/\D/g, '')}`;
         const result = await postgresMessageWriter.simulateInboundTextMessage({
             sessionId,
             recipientPhone,
             senderPhone,
-            text,
-            pushName,
+            text: simulatedText,
+            pushName: simulatedPushName,
             messageId,
         });
 
+        const webhookMessage = formatMessage({
+            key: {
+                remoteJid: `${result.senderPhone}@s.whatsapp.net`,
+                fromMe: false,
+                id: result.messageId,
+            },
+            messageTimestamp: Math.floor(Date.now() / 1000),
+            pushName: simulatedPushName,
+            message: {
+                conversation: simulatedText,
+            },
+        } as any);
+
+        dispatchWebhook({
+            sessionId: result.sessionId,
+            event: 'message',
+            data: webhookMessage,
+        });
         dispatchSessionWebhook({
             sessionId: result.sessionId,
             event: 'message',
-            data: {
-                id: result.messageId,
-                remoteJid: `${result.senderPhone}@s.whatsapp.net`,
-                pushName,
-                fromMe: false,
-                timestamp: Math.floor(Date.now() / 1000),
-                content: text || null,
-                type: 'text',
-                isGroup: false,
-                mediaUrl: null,
-            },
+            data: webhookMessage,
         });
 
         res.json({
