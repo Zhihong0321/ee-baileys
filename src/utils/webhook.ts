@@ -3,6 +3,20 @@ import { WAMessage } from '@whiskeysockets/baileys';
 import fs from 'fs-extra';
 import path from 'path';
 import { resolveSessionPath } from '../config/paths';
+import { recordWebhook } from './webhookLog';
+
+const previewPayload = (payload: WebhookPayload): { from: string | null; content: string | null } => {
+    const data: any = payload?.data || {};
+    return {
+        from: data.from || data.remoteJid || data.senderPhone || null,
+        content:
+            typeof data.content === 'string'
+                ? data.content.slice(0, 120)
+                : data.text
+                ? String(data.text).slice(0, 120)
+                : null,
+    };
+};
 
 export interface WebhookPayload {
     sessionId: string;
@@ -41,11 +55,22 @@ export const dispatchWebhook = async (payload: WebhookPayload) => {
     const url = process.env.WEBHOOK_URL;
     if (!url) return;
 
+    const { from, content } = previewPayload(payload);
+    const startedAt = Date.now();
     try {
-        await axios.post(url, payload, { timeout: 5000 });
+        const resp = await axios.post(url, payload, { timeout: 5000 });
         console.log(`[Webhook] Dispatched ${payload.event} for ${payload.sessionId}`);
+        recordWebhook({
+            kind: 'global', sessionId: payload.sessionId, url, from, event: payload.event,
+            contentPreview: content, ok: true, status: resp.status, durationMs: Date.now() - startedAt, error: null,
+        });
     } catch (err: any) {
         console.error(`[Webhook Error] ${payload.sessionId}: ${err.message}`);
+        recordWebhook({
+            kind: 'global', sessionId: payload.sessionId, url, from, event: payload.event,
+            contentPreview: content, ok: false, status: err?.response?.status ?? null,
+            durationMs: Date.now() - startedAt, error: err.message,
+        });
     }
 };
 
@@ -97,11 +122,22 @@ export const dispatchSessionWebhook = async (payload: WebhookPayload) => {
     const config = await getSessionWebhookConfig(payload.sessionId);
     if (!config) return;
 
+    const { from, content } = previewPayload(payload);
+    const startedAt = Date.now();
     try {
-        await axios.post(config.webhookUrl, payload, { timeout: 10000 });
+        const resp = await axios.post(config.webhookUrl, payload, { timeout: 10000 });
         console.log(`[Webhook] Dispatched session message webhook for ${payload.sessionId} -> ${config.webhookUrl}`);
+        recordWebhook({
+            kind: 'session', sessionId: payload.sessionId, url: config.webhookUrl, from, event: payload.event,
+            contentPreview: content, ok: true, status: resp.status, durationMs: Date.now() - startedAt, error: null,
+        });
     } catch (err: any) {
         console.error(`[Webhook Error] Session ${payload.sessionId} -> ${config.webhookUrl}: ${err.message}`);
+        recordWebhook({
+            kind: 'session', sessionId: payload.sessionId, url: config.webhookUrl, from, event: payload.event,
+            contentPreview: content, ok: false, status: err?.response?.status ?? null,
+            durationMs: Date.now() - startedAt, error: err.message,
+        });
     }
 };
 

@@ -30,6 +30,12 @@ const simulationLog = document.getElementById('simulationLog');
 const refreshSessionsBtn = document.getElementById('refreshSessions');
 const sessionList = document.getElementById('sessionList');
 
+const webhookFireLog = document.getElementById('webhookFireLog');
+const refreshWebhookFiresBtn = document.getElementById('refreshWebhookFires');
+const autoWebhookFiresBtn = document.getElementById('autoWebhookFires');
+const clearWebhookFiresBtn = document.getElementById('clearWebhookFires');
+let webhookFiresTimer = null;
+
 function setStatus(text, ok = true) {
   statusEl.textContent = text;
   statusEl.style.color = ok ? 'var(--accent-2)' : 'var(--danger)';
@@ -379,6 +385,73 @@ async function refreshSessions() {
   }
 }
 
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function renderWebhookFires(entries) {
+  if (!entries || entries.length === 0) {
+    webhookFireLog.innerHTML = '<span class="muted">No webhooks fired yet.</span>';
+    return;
+  }
+  const rows = entries.map(e => {
+    const ok = e.ok;
+    const dot = ok ? '🟢' : '🔴';
+    const status = e.status != null ? `HTTP ${e.status}` : (e.error ? 'FAILED' : '—');
+    const when = (e.at || '').replace('T', ' ').replace('Z', '').slice(0, 19);
+    const dur = e.durationMs != null ? `${e.durationMs}ms` : '';
+    const line1 = `${dot} ${escapeHtml(when)}  ·  ${escapeHtml(e.kind)}  ·  ${escapeHtml(status)} ${escapeHtml(dur)}`;
+    const line2 = `→ ${escapeHtml(e.url)}`;
+    const line3 = `from ${escapeHtml(e.from || '—')}${e.contentPreview ? '  ·  "' + escapeHtml(e.contentPreview) + '"' : ''}`;
+    const line4 = e.error ? `<span style="color:var(--danger)">error: ${escapeHtml(e.error)}</span>` : '';
+    return `<div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.08)">`
+      + `<div style="font-weight:600">${line1}</div>`
+      + `<div class="muted" style="font-size:0.85em">${line2}</div>`
+      + `<div class="muted" style="font-size:0.85em">${line3}</div>`
+      + (line4 ? `<div style="font-size:0.85em">${line4}</div>` : '')
+      + `</div>`;
+  }).join('');
+  webhookFireLog.innerHTML = rows;
+}
+
+async function refreshWebhookFires() {
+  try {
+    const res = await fetch('/webhook-log?limit=100', { cache: 'no-store' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to load webhook log');
+    renderWebhookFires(data.entries);
+  } catch (err) {
+    webhookFireLog.innerHTML = `<span class="muted">${escapeHtml(err.message)}</span>`;
+  }
+}
+
+function toggleAutoWebhookFires() {
+  if (webhookFiresTimer) {
+    clearInterval(webhookFiresTimer);
+    webhookFiresTimer = null;
+    autoWebhookFiresBtn.textContent = 'Auto-refresh: Off';
+  } else {
+    refreshWebhookFires();
+    webhookFiresTimer = setInterval(refreshWebhookFires, 3000);
+    autoWebhookFiresBtn.textContent = 'Auto-refresh: On';
+  }
+}
+
+async function clearWebhookFires() {
+  if (!confirm('Clear the webhook fire log?')) return;
+  try {
+    await fetch('/webhook-log', { method: 'DELETE' });
+    await refreshWebhookFires();
+  } catch (err) {
+    webhookFireLog.innerHTML = `<span class="muted">${escapeHtml(err.message)}</span>`;
+  }
+}
+
+refreshWebhookFiresBtn.addEventListener('click', refreshWebhookFires);
+autoWebhookFiresBtn.addEventListener('click', toggleAutoWebhookFires);
+clearWebhookFiresBtn.addEventListener('click', clearWebhookFires);
+
 createSessionBtn.addEventListener('click', initSession);
 refreshQrBtn.addEventListener('click', refreshQr);
 deleteSessionBtn.addEventListener('click', deleteSession);
@@ -391,3 +464,4 @@ refreshSessionsBtn.addEventListener('click', refreshSessions);
 
 checkServer();
 refreshSessions();
+refreshWebhookFires();

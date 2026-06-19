@@ -1,5 +1,6 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
+import { recordWebhook } from './utils/webhookLog';
 
 dotenv.config();
 
@@ -22,7 +23,23 @@ export const dispatchWebhook = async (sessionId: string, message: any) => {
         };
 
         console.log(`Sending webhook to ${url} for ${sessionId}`);
-        await axios.post(url, payload);
+        const startedAt = Date.now();
+        try {
+            const resp = await axios.post(url, payload);
+            recordWebhook({
+                kind: 'global', sessionId, url, from: payload.from, event: 'message',
+                contentPreview: String(payload.content || '').slice(0, 120),
+                ok: true, status: resp.status, durationMs: Date.now() - startedAt, error: null,
+            });
+        } catch (postErr: any) {
+            recordWebhook({
+                kind: 'global', sessionId, url, from: payload.from, event: 'message',
+                contentPreview: String(payload.content || '').slice(0, 120),
+                ok: false, status: postErr?.response?.status ?? null,
+                durationMs: Date.now() - startedAt, error: postErr.message,
+            });
+            throw postErr;
+        }
     } catch (err: any) {
         console.error(`Webhook Dispatch Error: ${err.message}`);
     }
@@ -49,12 +66,22 @@ export const dispatchOtpWebhook = async (message: any) => {
 
     const from = message.key?.remoteJid;
 
+    const startedAt = Date.now();
     try {
         const payload = { from, message: content };
         console.log(`Sending OTP webhook to ${url}: ${JSON.stringify(payload)}`);
-        await axios.post(url, payload, { timeout: 5000 });
+        const resp = await axios.post(url, payload, { timeout: 5000 });
+        recordWebhook({
+            kind: 'otp', sessionId: null, url, from: from || null, event: 'otp',
+            contentPreview: otp, ok: true, status: resp.status, durationMs: Date.now() - startedAt, error: null,
+        });
     } catch (err: any) {
         console.error(`OTP Webhook Error: ${err.message}`);
+        recordWebhook({
+            kind: 'otp', sessionId: null, url, from: from || null, event: 'otp',
+            contentPreview: otp, ok: false, status: err?.response?.status ?? null,
+            durationMs: Date.now() - startedAt, error: err.message,
+        });
     }
 };
 

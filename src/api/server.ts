@@ -16,6 +16,7 @@ import {
 } from '../utils/webhook';
 import { buildHealthReport } from '../health';
 import { MEDIA_BASE_DIR } from '../config/paths';
+import { getWebhookLog, clearWebhookLog } from '../utils/webhookLog';
 
 const app = express();
 app.use(express.json());
@@ -41,6 +42,7 @@ app.get('/api', (req, res) => {
             'GET /sessions/:id/webhook',
             'DELETE /sessions/:id/webhook',
             'POST /messages/send',
+            'GET /webhook-log?limit=100',
             'POST /simulate/inbound',
             'POST /groups/create',
             'DELETE /groups/:jid?sessionId=...',
@@ -49,6 +51,18 @@ app.get('/api', (req, res) => {
             'DELETE /sessions/:id'
         ]
     });
+});
+
+// Live log of every webhook the server has fired (session, global, OTP).
+app.get('/webhook-log', (req, res) => {
+    const limit = Number(req.query.limit) || 100;
+    const entries = getWebhookLog(limit);
+    res.json({ count: entries.length, entries });
+});
+
+app.delete('/webhook-log', (req, res) => {
+    clearWebhookLog();
+    res.json({ ok: true, cleared: true });
 });
 
 app.get('/health', (req, res) => {
