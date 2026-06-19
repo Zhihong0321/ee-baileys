@@ -250,7 +250,14 @@ export class WhatsAppInstance {
                         await postgresMessageWriter.attachInboundMedia(this.sessionId, msg.key.id, mediaUrl);
                     }
 
-                    const webhookMessage = formatMessage(msg, mediaUrl);
+                    const webhookMessage = formatMessage({
+                        ...msg,
+                        key: {
+                            ...(msg.key as any),
+                            remoteJid: senderJid,
+                            remoteJidAlt: (msg.key as any)?.remoteJidAlt || remoteJid,
+                        },
+                    } as any, mediaUrl);
                     dispatchWebhook({
                         sessionId: this.sessionId,
                         event: 'message',
