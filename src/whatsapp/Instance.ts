@@ -7,6 +7,7 @@ import makeWASocket, {
     ConnectionState,
     WASocket,
     GroupMetadata,
+    LIDMapping,
     proto,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
@@ -31,6 +32,8 @@ export class WhatsAppInstance {
     private groupCreateMutex = new Mutex();
     private chats = new Map<string, any>();
     private messagesByChat = new Map<string, Map<string, proto.IWebMessageInfo>>();
+    private lidToPn = new Map<string, string>();
+    private pnToLid = new Map<string, string>();
     private maxCachedMessagesPerChat: number;
 
     constructor(public readonly sessionId: string) {
@@ -149,8 +152,10 @@ export class WhatsAppInstance {
 
             this.sock.ev.on('creds.update', atomicSave);
 
-            this.sock.ev.on('messaging-history.set', ({ chats, messages }) => {
+            this.sock.ev.on('messaging-history.set', ({ chats, contacts, messages, lidPnMappings }) => {
                 if (this.destroyed) return;
+                this.recordLidMappings(lidPnMappings || []);
+                this.recordContactMappings(contacts || []);
                 this.upsertChats(chats);
                 this.cacheMessages(messages);
             });
@@ -163,6 +168,7 @@ export class WhatsAppInstance {
             this.sock.ev.on('chats.update', (updates) => {
                 if (this.destroyed) return;
                 for (const update of updates) {
+                    this.recordChatMapping(update);
                     const jid = this.resolveChatJid(update);
                     if (!jid) continue;
                     const prev = this.chats.get(jid) || {};
@@ -173,6 +179,21 @@ export class WhatsAppInstance {
                         isGroup: jid.endsWith('@g.us'),
                     });
                 }
+            });
+
+            this.sock.ev.on('contacts.upsert', (contacts) => {
+                if (this.destroyed) return;
+                this.recordContactMappings(contacts || []);
+            });
+
+            this.sock.ev.on('contacts.update', (contacts) => {
+                if (this.destroyed) return;
+                this.recordContactMappings(contacts || []);
+            });
+
+            this.sock.ev.on('lid-mapping.update', (mapping) => {
+                if (this.destroyed) return;
+                this.recordLidMapping(mapping);
             });
 
             this.sock.ev.on('chats.delete', (jids) => {
@@ -206,15 +227,14 @@ export class WhatsAppInstance {
                     // Deduplication
                     if (deduper.shouldIgnore(msg.key.id!)) continue;
 
-                    // Resolve sender phone number JID.
-                    // WhatsApp sends BOTH a phone-number JID (@s.whatsapp.net) and a LID (@lid)
-                    // on every message. The primary (remoteJid) can be either format.
-                    // remoteJidAlt always holds the OTHER format.
-                    // We always want the phone-number JID for lead matching.
-                    const key = msg.key as any;
-                    const senderJid = remoteJid?.endsWith('@lid')
-                        ? (key.remoteJidAlt || remoteJid)   // primary is LID → use alt (PN)
-                        : remoteJid!;                        // primary is already PN → use directly
+                    const senderJid = await this.resolveInboundSenderPhoneJid(msg);
+                    if (!senderJid) {
+                        console.error(
+                            `[${this.sessionId}] Cannot persist inbound ${msg.key.id}: ` +
+                            `no phone-number JID found for ${remoteJid}. Waiting for LID mapping.`
+                        );
+                        continue;
+                    }
 
                     console.log(`[${this.sessionId}] New message from ${msg.pushName || senderJid} (jid=${senderJid})`);
 
@@ -403,6 +423,8 @@ export class WhatsAppInstance {
         this.lastError = undefined;
         this.chats.clear();
         this.messagesByChat.clear();
+        this.lidToPn.clear();
+        this.pnToLid.clear();
 
         if (this.sock) {
             try {
@@ -415,15 +437,15 @@ export class WhatsAppInstance {
         }
     }
 
-    getChats(limit: number = 100) {
+    async getChats(limit: number = 100) {
         const items = Array.from(this.chats.values());
-        // NOTE: WhatsApp history sync stores many contacts under LID JIDs (@lid).
-        // We cannot resolve LID → phone number from chat objects alone (no remoteJidAlt),
-        // so we keep ALL chats and return phoneNumber: null for LID-only contacts.
         items.sort((a, b) => this.getChatSortTimestamp(b) - this.getChatSortTimestamp(a));
-        return items.slice(0, limit).map(chat => ({
+        const selected = items.slice(0, limit);
+        await this.hydrateMappingsForJids(selected.map(chat => chat.id));
+
+        return selected.map(chat => ({
             id: chat.id,
-            phoneNumber: this.extractPhoneNumber(chat.id),
+            phoneNumber: this.extractPhoneNumber(this.resolvePhoneJid(chat.id) || chat.id),
             name: chat.name || chat.formattedName || null,
             unreadCount: chat.unreadCount || 0,
             archived: !!chat.archived,
@@ -433,13 +455,22 @@ export class WhatsAppInstance {
         }));
     }
 
-    getChatMessages(jid: string, limit: number = 50, beforeTimestamp?: number) {
-        // Normalise the requested JID so a phone-number lookup always hits
-        const storageJid = this.resolveStorageJid(jid);
-        const map = this.messagesByChat.get(storageJid);
-        if (!map) return [];
+    async getChatMessages(jid: string, limit: number = 50, beforeTimestamp?: number) {
+        await this.hydrateMappingsForJids([jid]);
 
-        let items = Array.from(map.values());
+        const lookupJids = this.resolveMessageLookupJids(jid);
+        const combined = new Map<string, proto.IWebMessageInfo>();
+        for (const lookupJid of lookupJids) {
+            const map = this.messagesByChat.get(lookupJid);
+            if (!map) continue;
+            for (const [messageId, msg] of map.entries()) {
+                combined.set(messageId, msg);
+            }
+        }
+
+        if (!combined.size) return [];
+
+        let items = Array.from(combined.values());
         items.sort((a, b) => this.messageTimestampMs(a) - this.messageTimestampMs(b));
 
         if (beforeTimestamp && Number.isFinite(beforeTimestamp)) {
@@ -452,7 +483,7 @@ export class WhatsAppInstance {
 
         return items.map(msg => ({
             id: msg.key?.id || null,
-            phoneNumber: this.extractPhoneNumber(storageJid),
+            phoneNumber: this.extractPhoneNumber(this.resolveMessagePhoneJid(msg, jid) || jid),
             fromMe: !!msg.key?.fromMe,
             timestamp: this.messageTimestampMs(msg),
             type: msg.message ? Object.keys(msg.message)[0] : 'unknown',
@@ -462,11 +493,9 @@ export class WhatsAppInstance {
 
     private upsertChats(chats: any[]) {
         for (const chat of chats || []) {
+            this.recordChatMapping(chat);
             const jid = this.resolveChatJid(chat);
             if (!jid) continue;
-            // Chat objects do NOT carry remoteJidAlt — we store under whatever JID
-            // WhatsApp gives us (phone-number or LID). resolveStorageJid is used
-            // only for message keys where remoteJidAlt is actually present.
             const prev = this.chats.get(jid) || {};
             this.chats.set(jid, {
                 ...prev,
@@ -484,21 +513,24 @@ export class WhatsAppInstance {
 
             // Normalise LID → phone-number JID using the alt field when present
             const key = msg.key as any;
-            const jid = this.resolveStorageJid(rawJid, key?.remoteJidAlt);
+            this.recordMappingFromJids(rawJid, key?.remoteJidAlt);
+            const cacheJids = this.resolveMessageLookupJids(rawJid, key?.remoteJidAlt);
 
             const messageId = msg.key?.id || `${this.messageTimestampMs(msg)}-${Math.random()}`;
-            const existing = this.messagesByChat.get(jid) || new Map<string, proto.IWebMessageInfo>();
-            existing.set(messageId, msg);
+            for (const jid of cacheJids) {
+                const existing = this.messagesByChat.get(jid) || new Map<string, proto.IWebMessageInfo>();
+                existing.set(messageId, msg);
 
-            if (existing.size > this.maxCachedMessagesPerChat) {
-                const sorted = Array.from(existing.entries()).sort((a, b) => this.messageTimestampMs(a[1]) - this.messageTimestampMs(b[1]));
-                const overflow = existing.size - this.maxCachedMessagesPerChat;
-                for (let i = 0; i < overflow; i++) {
-                    existing.delete(sorted[i][0]);
+                if (existing.size > this.maxCachedMessagesPerChat) {
+                    const sorted = Array.from(existing.entries()).sort((a, b) => this.messageTimestampMs(a[1]) - this.messageTimestampMs(b[1]));
+                    const overflow = existing.size - this.maxCachedMessagesPerChat;
+                    for (let i = 0; i < overflow; i++) {
+                        existing.delete(sorted[i][0]);
+                    }
                 }
-            }
 
-            this.messagesByChat.set(jid, existing);
+                this.messagesByChat.set(jid, existing);
+            }
         }
     }
 
@@ -506,15 +538,166 @@ export class WhatsAppInstance {
         return chat?.id || chat?.jid;
     }
 
-    /**
-     * If the primary JID is a LID (@lid), swap it for the phone-number JID (@s.whatsapp.net)
-     * when an alternate is available. Otherwise return primary as-is.
-     */
-    private resolveStorageJid(primary: string, alt?: string): string {
-        if (primary?.endsWith('@lid') && alt && alt.endsWith('@s.whatsapp.net')) {
-            return alt;
+    private resolveMessageLookupJids(primary: string, alt?: string): string[] {
+        const jids = new Set<string>();
+        const normalizedPrimary = this.normalizeJid(primary);
+        const normalizedAlt = this.normalizeJid(alt);
+
+        if (normalizedPrimary) jids.add(normalizedPrimary);
+        if (normalizedAlt) jids.add(normalizedAlt);
+
+        const phoneJid = this.resolvePhoneJid(normalizedPrimary || primary) || this.resolvePhoneJid(normalizedAlt || alt || '');
+        const lidJid = this.resolveLidJid(normalizedPrimary || primary) || this.resolveLidJid(normalizedAlt || alt || '');
+
+        if (phoneJid) jids.add(phoneJid);
+        if (lidJid) jids.add(lidJid);
+
+        return Array.from(jids);
+    }
+
+    private recordContactMappings(contacts: any[]) {
+        for (const contact of contacts || []) {
+            this.recordChatMapping(contact);
         }
-        return primary;
+    }
+
+    private recordChatMapping(value: any) {
+        const id = this.normalizeJid(value?.id || value?.jid);
+        const lid = this.normalizeLidJid(value?.lid || value?.lidJid || value?.accountLid);
+        const pn = this.normalizePnJid(value?.phoneNumber || value?.pnJid);
+
+        this.recordMappingFromJids(id, pn || lid || undefined);
+        this.recordMappingFromJids(lid || undefined, pn || id || undefined);
+    }
+
+    private recordLidMappings(mappings: LIDMapping[]) {
+        for (const mapping of mappings || []) {
+            this.recordLidMapping(mapping);
+        }
+    }
+
+    private recordLidMapping(mapping?: Partial<LIDMapping> | null) {
+        if (!mapping) return;
+        const lid = this.normalizeLidJid(mapping.lid);
+        const pn = this.normalizePnJid(mapping.pn);
+        if (!lid || !pn) return;
+
+        this.lidToPn.set(lid, pn);
+        this.pnToLid.set(pn, lid);
+    }
+
+    private recordMappingFromJids(a?: string | null, b?: string | null) {
+        const first = this.normalizeJid(a);
+        const second = this.normalizeJid(b);
+        if (!first || !second) return;
+
+        const lid = this.normalizeLidJid(first) || this.normalizeLidJid(second);
+        const pn = this.normalizePnJid(first) || this.normalizePnJid(second);
+        if (lid && pn) {
+            this.recordLidMapping({ lid, pn });
+        }
+    }
+
+    private async hydrateMappingsForJids(jids: Array<string | undefined | null>) {
+        const lidMapping = (this.sock as any)?.signalRepository?.lidMapping;
+        if (!lidMapping) return;
+
+        const lids = Array.from(new Set(
+            jids
+                .map(jid => this.normalizeLidJid(jid))
+                .filter((jid): jid is string => !!jid && !this.lidToPn.has(jid))
+        ));
+        const pns = Array.from(new Set(
+            jids
+                .map(jid => this.normalizePnJid(jid))
+                .filter((jid): jid is string => !!jid && !this.pnToLid.has(jid))
+        ));
+
+        try {
+            if (lids.length > 0) {
+                const mappings = await lidMapping.getPNsForLIDs(lids);
+                this.recordLidMappings(mappings || []);
+            }
+            if (pns.length > 0) {
+                const mappings = await lidMapping.getLIDsForPNs(pns);
+                this.recordLidMappings(mappings || []);
+            }
+        } catch (err: any) {
+            console.warn(`[${this.sessionId}] Failed to hydrate LID mapping: ${err.message}`);
+        }
+    }
+
+    private resolvePhoneJid(jid?: string | null): string | null {
+        const normalized = this.normalizeJid(jid);
+        if (!normalized) return null;
+
+        const pn = this.normalizePnJid(normalized);
+        if (pn) return pn;
+
+        const lid = this.normalizeLidJid(normalized);
+        return lid ? this.lidToPn.get(lid) || null : null;
+    }
+
+    private resolveLidJid(jid?: string | null): string | null {
+        const normalized = this.normalizeJid(jid);
+        if (!normalized) return null;
+
+        const lid = this.normalizeLidJid(normalized);
+        if (lid) return lid;
+
+        const pn = this.normalizePnJid(normalized);
+        return pn ? this.pnToLid.get(pn) || null : null;
+    }
+
+    private resolveMessagePhoneJid(msg: proto.IWebMessageInfo, fallbackJid?: string): string | null {
+        const key = msg.key as any;
+        return this.resolvePhoneJid(key?.remoteJid)
+            || this.resolvePhoneJid(key?.remoteJidAlt)
+            || this.resolvePhoneJid(fallbackJid);
+    }
+
+    private async resolveInboundSenderPhoneJid(msg: proto.IWebMessageInfo): Promise<string | null> {
+        const key = msg.key as any;
+        this.recordMappingFromJids(key?.remoteJid, key?.remoteJidAlt);
+
+        let phoneJid = this.resolveMessagePhoneJid(msg);
+        if (phoneJid) return phoneJid;
+
+        await this.hydrateMappingsForJids([key?.remoteJid, key?.remoteJidAlt]);
+        phoneJid = this.resolveMessagePhoneJid(msg);
+
+        if (phoneJid) {
+            key.remoteJidAlt = key.remoteJidAlt || phoneJid;
+        }
+
+        return phoneJid;
+    }
+
+    private normalizeJid(jid?: string | null): string | null {
+        const raw = String(jid || '').trim().toLowerCase();
+        return raw || null;
+    }
+
+    private normalizePnJid(jid?: string | null): string | null {
+        const normalized = this.normalizeJid(jid);
+        if (!normalized) return null;
+
+        if (normalized.endsWith('@s.whatsapp.net')) {
+            return normalized;
+        }
+
+        if (normalized.includes('@')) {
+            return null;
+        }
+
+        const digits = normalized.replace(/[^\d]/g, '');
+        return digits ? `${digits}@s.whatsapp.net` : null;
+    }
+
+    private normalizeLidJid(jid?: string | null): string | null {
+        const normalized = this.normalizeJid(jid);
+        if (!normalized) return null;
+        return normalized.endsWith('@lid') ? normalized : null;
     }
 
     /**

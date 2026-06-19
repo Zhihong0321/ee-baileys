@@ -904,6 +904,11 @@ class PostgresMessageWriter {
         if (!messageId || !senderJid) return;
 
         try {
+            const senderPhone = this.extractPhoneDigitsFromJid(senderJid);
+            if (!senderPhone) {
+                throw new Error(`Inbound sender must be a phone-number JID, got: ${senderJid}`);
+            }
+
             await this.enqueueInboundInboxMessage(sessionId, msg, senderJid, recipientPhone);
             await this.processSpecificInboundInboxMessage(sessionId, messageId);
 

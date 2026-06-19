@@ -523,10 +523,11 @@ app.get('/chats', async (req, res) => {
         return res.status(404).json({ error: 'Session not found' });
     }
 
+    const chats = await instance.getChats(limit);
     return res.json({
         sessionId,
-        count: instance.getChats(limit).length,
-        chats: instance.getChats(limit),
+        count: chats.length,
+        chats,
     });
 });
 
@@ -548,7 +549,7 @@ app.get('/chats/:jid/messages', async (req, res) => {
         return res.status(404).json({ error: 'Session not found' });
     }
 
-    const messages = instance.getChatMessages(jid, limit, beforeTimestamp);
+    const messages = await instance.getChatMessages(jid, limit, beforeTimestamp);
     return res.json({
         sessionId,
         jid,
