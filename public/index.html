@@ -72,15 +72,43 @@
 
     <section class="card">
       <h2>Webhook Fire Log</h2>
-      <p class="muted">Every webhook this server has fired (newest first). Live activity log — resets on restart.</p>
+      <p class="muted">Every webhook this server has fired (newest first), including request payloads and response bodies.</p>
+      <div class="grid log-controls">
+        <label class="field">
+          <span>Session ID</span>
+          <input id="webhookFireSessionFilter" type="text" placeholder="all sessions" />
+        </label>
+        <label class="field">
+          <span>Webhook Type</span>
+          <select id="webhookFireKindFilter">
+            <option value="">All</option>
+            <option value="session">Session</option>
+            <option value="global">Global</option>
+            <option value="otp">OTP</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Status</span>
+          <select id="webhookFireStatusFilter">
+            <option value="">All</option>
+            <option value="true">Success</option>
+            <option value="false">Failed</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Limit</span>
+          <input id="webhookFireLimit" type="number" min="1" max="500" value="100" />
+        </label>
+      </div>
       <div class="actions">
         <button id="refreshWebhookFires" class="ghost">Refresh</button>
         <button id="autoWebhookFires" class="ghost">Auto-refresh: Off</button>
         <button id="clearWebhookFires" class="danger ghost">Clear Log</button>
       </div>
-      <div id="webhookFireLog" class="log" style="overflow:auto;max-height:420px;">
+      <div id="webhookFireLog" class="log webhook-fire-list">
         <span class="muted">No webhooks fired yet.</span>
       </div>
+      <pre class="log webhook-fire-detail" id="webhookFireDetail">Select a webhook fire to inspect the full request and response.</pre>
     </section>
 
     <section class="card">

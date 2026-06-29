@@ -498,6 +498,58 @@ export class WhatsAppInstance {
         }));
     }
 
+    async getUnansweredMessages(limit: number = 100, afterTimestamp?: number) {
+        const items = Array.from(this.chats.values());
+        items.sort((a, b) => this.getChatSortTimestamp(b) - this.getChatSortTimestamp(a));
+        
+        const unanswered: proto.IWebMessageInfo[] = [];
+        
+        for (const chat of items) {
+            if (chat.isGroup) continue;
+            if (chat.id === 'status@broadcast') continue;
+            
+            const jid = chat.id;
+            const lookupJids = this.resolveMessageLookupJids(jid);
+            
+            let latestMsg: proto.IWebMessageInfo | null = null;
+            for (const lookupJid of lookupJids) {
+                const map = this.messagesByChat.get(lookupJid);
+                if (!map) continue;
+                for (const msg of map.values()) {
+                    if (!latestMsg || this.messageTimestampMs(msg) > this.messageTimestampMs(latestMsg)) {
+                        latestMsg = msg;
+                    }
+                }
+            }
+            
+            if (latestMsg && !latestMsg.key?.fromMe) {
+                if (afterTimestamp && this.messageTimestampMs(latestMsg) < afterTimestamp) {
+                    continue; // Message is too old
+                }
+                unanswered.push(latestMsg);
+                if (unanswered.length >= limit) break;
+            }
+        }
+        
+        await this.hydrateMappingsForJids(unanswered.map(msg => msg.key?.remoteJid).filter(Boolean));
+
+        return unanswered.map(msg => {
+            const jid = msg.key?.remoteJid || '';
+            const key = msg.key as any;
+            return {
+                id: msg.key?.id || null,
+                jid,
+                phoneNumber: this.extractPhoneNumber(this.resolveMessagePhoneJid(msg, jid) || jid),
+                fromMe: !!msg.key?.fromMe,
+                timestamp: this.messageTimestampMs(msg),
+                type: msg.message ? Object.keys(msg.message)[0] : 'unknown',
+                content: this.extractMessageText(msg),
+                pushName: msg.pushName || null,
+                remoteJidAlt: key?.remoteJidAlt || null,
+            };
+        });
+    }
+
     private upsertChats(chats: any[]) {
         for (const chat of chats || []) {
             this.recordChatMapping(chat);
@@ -746,15 +798,12 @@ export class WhatsAppInstance {
     }
 
     private extractMessageText(msg: proto.IWebMessageInfo): string {
-        return msg.message?.conversation ||
-            msg.message?.extendedTextMessage?.text ||
-            msg.message?.imageMessage?.caption ||
-            msg.message?.videoMessage?.caption ||
-            '';
+        const message = this.normalizeMessage(msg.message || null);
+        return this.resolveMessagePreview(message) || '';
     }
 
     /**
-     * Download, decrypt, and save supported inbound media (voice, image, PDF).
+     * Download, decrypt, and save supported inbound media.
      * Saves to the global media/ directory served by Express and returns an HTTP URL,
      * or null if the message has no supported media or download fails.
      */
@@ -800,7 +849,7 @@ export class WhatsAppInstance {
         }
     }
 
-    private normalizeMessage(message: proto.IMessage): proto.IMessage | null {
+    private normalizeMessage(message?: proto.IMessage | null): proto.IMessage | null {
         let current: any = message;
 
         while (current) {
@@ -831,14 +880,14 @@ export class WhatsAppInstance {
     }
 
     private resolveSupportedMediaMeta(msg: proto.IWebMessageInfo, message: proto.IMessage): {
-        kind: 'voice' | 'pdf' | 'image';
+        kind: 'voice' | 'audio' | 'image' | 'video' | 'document' | 'sticker';
         defaultExt: string;
         mimeType?: string | null;
         originalFileName?: string | null;
     } | null {
         if (message.audioMessage) {
             return {
-                kind: 'voice',
+                kind: (message.audioMessage as any).ptt ? 'voice' : 'audio',
                 defaultExt: 'ogg',
                 mimeType: message.audioMessage.mimetype
             };
@@ -852,18 +901,30 @@ export class WhatsAppInstance {
             };
         }
 
+        if (message.videoMessage) {
+            return {
+                kind: 'video',
+                defaultExt: 'mp4',
+                mimeType: message.videoMessage.mimetype
+            };
+        }
+
         if (message.documentMessage) {
-            const mime = (message.documentMessage.mimetype || '').toLowerCase();
             const fileName = message.documentMessage.fileName || '';
-            const isPdf = mime === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf');
-            if (isPdf) {
-                return {
-                    kind: 'pdf',
-                    defaultExt: 'pdf',
-                    mimeType: message.documentMessage.mimetype,
-                    originalFileName: fileName || `${msg.key?.id || 'document'}.pdf`
-                };
-            }
+            return {
+                kind: 'document',
+                defaultExt: 'bin',
+                mimeType: message.documentMessage.mimetype,
+                originalFileName: fileName || `${msg.key?.id || 'document'}`
+            };
+        }
+
+        if (message.stickerMessage) {
+            return {
+                kind: 'sticker',
+                defaultExt: 'webp',
+                mimeType: message.stickerMessage.mimetype
+            };
         }
 
         return null;
@@ -893,11 +954,23 @@ export class WhatsAppInstance {
             'audio/aac': 'aac',
             'audio/amr': 'amr',
             'application/pdf': 'pdf',
+            'application/msword': 'doc',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+            'application/vnd.ms-excel': 'xls',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+            'application/vnd.ms-powerpoint': 'ppt',
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+            'text/plain': 'txt',
+            'text/csv': 'csv',
             'image/jpeg': 'jpg',
             'image/jpg': 'jpg',
             'image/png': 'png',
             'image/webp': 'webp',
-            'image/heic': 'heic'
+            'image/heic': 'heic',
+            'video/mp4': 'mp4',
+            'video/3gpp': '3gp',
+            'video/quicktime': 'mov',
+            'video/webm': 'webm'
         };
 
         if (known[cleanMime]) {
@@ -915,6 +988,79 @@ export class WhatsAppInstance {
 
     private sanitizeFileComponent(input: string): string {
         return input.replace(/[^a-zA-Z0-9._-]/g, '_');
+    }
+
+    private resolveMessagePreview(message: proto.IMessage | null): string | null {
+        if (!message) return null;
+
+        return message.conversation ||
+            message.extendedTextMessage?.text ||
+            message.imageMessage?.caption ||
+            message.videoMessage?.caption ||
+            message.documentMessage?.caption ||
+            this.resolveContactPreview(message) ||
+            this.resolveLocationPreview(message) ||
+            this.resolveMediaPreview(message) ||
+            null;
+    }
+
+    private resolveContactPreview(message: proto.IMessage): string | null {
+        const contact = message.contactMessage as any;
+        if (contact) {
+            const displayName = contact.displayName || contact.display_name || 'Contact';
+            const phone = this.extractPhoneFromVCard(contact.vcard);
+            return phone ? `${displayName} (${phone})` : displayName;
+        }
+
+        const contactsMessage = message.contactsArrayMessage as any;
+        const contacts = Array.isArray(contactsMessage?.contacts) ? contactsMessage.contacts : [];
+        if (contacts.length === 0) return null;
+
+        const labels = contacts
+            .slice(0, 5)
+            .map((item: any) => {
+                const displayName = item.displayName || item.display_name || 'Contact';
+                const phone = this.extractPhoneFromVCard(item.vcard);
+                return phone ? `${displayName} (${phone})` : displayName;
+            });
+        const suffix = contacts.length > labels.length ? ` +${contacts.length - labels.length} more` : '';
+        return `Contacts: ${labels.join(', ')}${suffix}`;
+    }
+
+    private resolveLocationPreview(message: proto.IMessage): string | null {
+        const location = (message.locationMessage || message.liveLocationMessage) as any;
+        if (!location) return null;
+
+        const name = location.name || location.address;
+        const latitude = location.degreesLatitude;
+        const longitude = location.degreesLongitude;
+        const coordinates = latitude !== undefined && longitude !== undefined ? `${latitude},${longitude}` : null;
+
+        if (name && coordinates) return `${name} (${coordinates})`;
+        return name || coordinates || 'Location';
+    }
+
+    private resolveMediaPreview(message: proto.IMessage): string | null {
+        if (message.audioMessage) return (message.audioMessage as any).ptt ? 'Voice note' : 'Audio';
+        if (message.stickerMessage) return 'Sticker';
+
+        const documentMessage = message.documentMessage as any;
+        if (documentMessage?.fileName) return documentMessage.fileName;
+
+        return null;
+    }
+
+    private extractPhoneFromVCard(vcard?: string | null): string | null {
+        if (!vcard) return null;
+
+        const telLine = vcard
+            .split(/\r?\n/)
+            .find(line => /^TEL/i.test(line));
+        if (!telLine) return null;
+
+        const rawValue = telLine.split(':').slice(1).join(':').trim();
+        const digits = rawValue.replace(/[^\d+]/g, '');
+        return digits || null;
     }
 
     private resolvePublicMediaBaseUrl(): string | null {

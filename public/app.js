@@ -31,10 +31,16 @@ const refreshSessionsBtn = document.getElementById('refreshSessions');
 const sessionList = document.getElementById('sessionList');
 
 const webhookFireLog = document.getElementById('webhookFireLog');
+const webhookFireDetail = document.getElementById('webhookFireDetail');
 const refreshWebhookFiresBtn = document.getElementById('refreshWebhookFires');
 const autoWebhookFiresBtn = document.getElementById('autoWebhookFires');
 const clearWebhookFiresBtn = document.getElementById('clearWebhookFires');
+const webhookFireSessionFilterEl = document.getElementById('webhookFireSessionFilter');
+const webhookFireKindFilterEl = document.getElementById('webhookFireKindFilter');
+const webhookFireStatusFilterEl = document.getElementById('webhookFireStatusFilter');
+const webhookFireLimitEl = document.getElementById('webhookFireLimit');
 let webhookFiresTimer = null;
+let selectedWebhookFireId = null;
 
 function setStatus(text, ok = true) {
   statusEl.textContent = text;
@@ -390,34 +396,93 @@ function escapeHtml(value) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+function buildWebhookFireQuery() {
+  const params = new URLSearchParams();
+  const limit = Number(webhookFireLimitEl.value || 100);
+  params.set('limit', String(Number.isFinite(limit) ? Math.max(1, Math.min(limit, 500)) : 100));
+
+  const sessionId = webhookFireSessionFilterEl.value.trim();
+  const kind = webhookFireKindFilterEl.value;
+  const ok = webhookFireStatusFilterEl.value;
+  if (sessionId) params.set('sessionId', sessionId);
+  if (kind) params.set('kind', kind);
+  if (ok) params.set('ok', ok);
+  return params;
+}
+
+function formatWebhookDetail(entry) {
+  return JSON.stringify({
+    id: entry.id,
+    firedAt: entry.at,
+    summary: {
+      kind: entry.kind,
+      sessionId: entry.sessionId,
+      event: entry.event,
+      from: entry.from,
+      ok: entry.ok,
+      status: entry.status,
+      durationMs: entry.durationMs,
+      error: entry.error
+    },
+    request: entry.request,
+    response: entry.response,
+    errorDetails: entry.errorDetails
+  }, null, 2);
+}
+
+async function openWebhookFire(id) {
+  selectedWebhookFireId = String(id);
+  webhookFireDetail.textContent = 'Loading webhook fire details...';
+  try {
+    const res = await fetch(`/webhook-log/${encodeURIComponent(String(id))}`, { cache: 'no-store' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to load webhook fire details');
+    webhookFireDetail.textContent = formatWebhookDetail(data);
+    document.querySelectorAll('.webhook-fire-row').forEach(row => {
+      row.classList.toggle('selected', row.dataset.id === String(id));
+    });
+  } catch (err) {
+    webhookFireDetail.textContent = err.message;
+  }
+}
+
 function renderWebhookFires(entries) {
   if (!entries || entries.length === 0) {
     webhookFireLog.innerHTML = '<span class="muted">No webhooks fired yet.</span>';
     return;
   }
   const rows = entries.map(e => {
-    const ok = e.ok;
-    const dot = ok ? '🟢' : '🔴';
+    const resultClass = e.ok ? 'ok' : 'failed';
     const status = e.status != null ? `HTTP ${e.status}` : (e.error ? 'FAILED' : '—');
     const when = (e.at || '').replace('T', ' ').replace('Z', '').slice(0, 19);
     const dur = e.durationMs != null ? `${e.durationMs}ms` : '';
-    const line1 = `${dot} ${escapeHtml(when)}  ·  ${escapeHtml(e.kind)}  ·  ${escapeHtml(status)} ${escapeHtml(dur)}`;
-    const line2 = `→ ${escapeHtml(e.url)}`;
-    const line3 = `from ${escapeHtml(e.from || '—')}${e.contentPreview ? '  ·  "' + escapeHtml(e.contentPreview) + '"' : ''}`;
-    const line4 = e.error ? `<span style="color:var(--danger)">error: ${escapeHtml(e.error)}</span>` : '';
-    return `<div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.08)">`
-      + `<div style="font-weight:600">${line1}</div>`
-      + `<div class="muted" style="font-size:0.85em">${line2}</div>`
-      + `<div class="muted" style="font-size:0.85em">${line3}</div>`
-      + (line4 ? `<div style="font-size:0.85em">${line4}</div>` : '')
+    const preview = e.contentPreview ? ` "${escapeHtml(e.contentPreview)}"` : '';
+    return `<div class="webhook-fire-row ${selectedWebhookFireId === String(e.id) ? 'selected' : ''}" data-id="${escapeHtml(e.id)}">`
+      + `<div class="webhook-fire-main">`
+      + `<div class="webhook-fire-title">`
+      + `<span class="result-dot ${resultClass}"></span>`
+      + `<span>${escapeHtml(when)}</span>`
+      + `<span class="pill">${escapeHtml(e.kind)}</span>`
+      + `<span class="pill">${escapeHtml(e.event || 'event')}</span>`
+      + `<span class="pill">${escapeHtml(status)}</span>`
+      + (dur ? `<span class="pill">${escapeHtml(dur)}</span>` : '')
+      + `</div>`
+      + `<div class="webhook-fire-url">${escapeHtml(e.url)}</div>`
+      + `<div class="webhook-fire-meta">session ${escapeHtml(e.sessionId || 'none')} · from ${escapeHtml(e.from || 'unknown')}${preview}</div>`
+      + (e.error ? `<div class="webhook-fire-error">error: ${escapeHtml(e.error)}</div>` : '')
+      + `</div>`
+      + `<button class="ghost webhook-fire-open" data-id="${escapeHtml(e.id)}">Open Full Log</button>`
       + `</div>`;
   }).join('');
   webhookFireLog.innerHTML = rows;
+  document.querySelectorAll('.webhook-fire-open').forEach(btn => {
+    btn.addEventListener('click', () => openWebhookFire(btn.dataset.id));
+  });
 }
 
 async function refreshWebhookFires() {
   try {
-    const res = await fetch('/webhook-log?limit=100', { cache: 'no-store' });
+    const res = await fetch(`/webhook-log?${buildWebhookFireQuery().toString()}`, { cache: 'no-store' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to load webhook log');
     renderWebhookFires(data.entries);
@@ -442,6 +507,8 @@ async function clearWebhookFires() {
   if (!confirm('Clear the webhook fire log?')) return;
   try {
     await fetch('/webhook-log', { method: 'DELETE' });
+    selectedWebhookFireId = null;
+    webhookFireDetail.textContent = 'Select a webhook fire to inspect the full request and response.';
     await refreshWebhookFires();
   } catch (err) {
     webhookFireLog.innerHTML = `<span class="muted">${escapeHtml(err.message)}</span>`;
@@ -451,6 +518,12 @@ async function clearWebhookFires() {
 refreshWebhookFiresBtn.addEventListener('click', refreshWebhookFires);
 autoWebhookFiresBtn.addEventListener('click', toggleAutoWebhookFires);
 clearWebhookFiresBtn.addEventListener('click', clearWebhookFires);
+webhookFireKindFilterEl.addEventListener('change', refreshWebhookFires);
+webhookFireStatusFilterEl.addEventListener('change', refreshWebhookFires);
+webhookFireLimitEl.addEventListener('change', refreshWebhookFires);
+webhookFireSessionFilterEl.addEventListener('keydown', event => {
+  if (event.key === 'Enter') refreshWebhookFires();
+});
 
 createSessionBtn.addEventListener('click', initSession);
 refreshQrBtn.addEventListener('click', refreshQr);

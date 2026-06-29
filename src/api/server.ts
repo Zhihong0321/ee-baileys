@@ -16,7 +16,7 @@ import {
 } from '../utils/webhook';
 import { buildHealthReport } from '../health';
 import { MEDIA_BASE_DIR } from '../config/paths';
-import { getWebhookLog, clearWebhookLog } from '../utils/webhookLog';
+import { getWebhookLog, getWebhookLogEntry, clearWebhookLog, WebhookLogEntry } from '../utils/webhookLog';
 
 const app = express();
 app.use(express.json());
@@ -42,12 +42,14 @@ app.get('/api', (req, res) => {
             'GET /sessions/:id/webhook',
             'DELETE /sessions/:id/webhook',
             'POST /messages/send',
-            'GET /webhook-log?limit=100',
+            'GET /webhook-log?limit=100&kind=session&sessionId=agent-01&ok=true',
+            'GET /webhook-log/:id',
             'POST /simulate/inbound',
             'POST /groups/create',
             'DELETE /groups/:jid?sessionId=...',
             'GET /chats?sessionId=...',
             'GET /chats/:jid/messages?sessionId=...&limit=50&beforeTimestamp=...',
+            'GET /sessions/:id/messages/unanswered?limit=100&afterTimestamp=...',
             'DELETE /sessions/:id'
         ]
     });
@@ -56,8 +58,32 @@ app.get('/api', (req, res) => {
 // Live log of every webhook the server has fired (session, global, OTP).
 app.get('/webhook-log', (req, res) => {
     const limit = Number(req.query.limit) || 100;
-    const entries = getWebhookLog(limit);
+    const kind = String(req.query.kind || '').trim();
+    const sessionId = String(req.query.sessionId || '').trim();
+    const okRaw = String(req.query.ok || '').trim().toLowerCase();
+    const ok = okRaw === 'true' ? true : okRaw === 'false' ? false : undefined;
+    const allowedKinds: Array<WebhookLogEntry['kind']> = ['session', 'global', 'otp'];
+    const entries = getWebhookLog({
+        limit,
+        kind: allowedKinds.includes(kind as WebhookLogEntry['kind']) ? kind as WebhookLogEntry['kind'] : undefined,
+        sessionId: sessionId || undefined,
+        ok,
+    });
     res.json({ count: entries.length, entries });
+});
+
+app.get('/webhook-log/:id', (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ error: 'Invalid webhook log id' });
+    }
+
+    const entry = getWebhookLogEntry(id);
+    if (!entry) {
+        return res.status(404).json({ error: 'Webhook log entry not found' });
+    }
+
+    res.json(entry);
 });
 
 app.delete('/webhook-log', (req, res) => {
@@ -582,6 +608,31 @@ app.get('/chats/:jid/messages', async (req, res) => {
         count: messages.length,
         messages,
     });
+});
+
+// Retrieve latest unanswered message for each chat
+app.get('/sessions/:id/messages/unanswered', async (req, res) => {
+    try {
+        const instance = manager.getExistingInstance(req.params.id);
+        if (!instance) {
+            return res.status(404).json({ error: 'Session not found' });
+        }
+        
+        const rawLimit = Number(req.query.limit || 100);
+        const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 100;
+        
+        const afterTimestampRaw = req.query.afterTimestamp;
+        const afterTimestamp = afterTimestampRaw !== undefined ? Number(afterTimestampRaw) : undefined;
+
+        const messages = await instance.getUnansweredMessages(limit, afterTimestamp);
+        return res.json({
+            sessionId: req.params.id,
+            count: messages.length,
+            messages,
+        });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // Logout and permanently delete session data

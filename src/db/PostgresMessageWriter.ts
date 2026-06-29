@@ -125,7 +125,7 @@ class PostgresMessageWriter {
         const sql = `
             SELECT id, tenant_id
             FROM et_channel_sessions
-            WHERE LOWER(channel_type) = 'whatsapp'
+            WHERE LOWER(channel_type::text) = 'whatsapp'
               AND session_identifier = $1
             LIMIT 1
         `;
@@ -678,7 +678,7 @@ class PostgresMessageWriter {
                     ) AS connected_number,
                     updated_at
                 FROM et_channel_sessions
-                WHERE LOWER(channel_type) = 'whatsapp'
+                WHERE LOWER(channel_type::text) = 'whatsapp'
                   AND session_identifier IS NOT NULL
                 ORDER BY updated_at DESC NULLS LAST, id DESC
             `);
@@ -734,7 +734,7 @@ class PostgresMessageWriter {
                 metadata->'last_connect_response'->'me'->>'phone'
             ) AS connected_number
             FROM et_channel_sessions
-            WHERE LOWER(channel_type) = 'whatsapp'
+            WHERE LOWER(channel_type::text) = 'whatsapp'
               AND session_identifier = $1
             LIMIT 1
         `;
@@ -751,7 +751,7 @@ class PostgresMessageWriter {
         const sql = `
             SELECT session_identifier
             FROM et_channel_sessions
-            WHERE LOWER(channel_type) = 'whatsapp'
+            WHERE LOWER(channel_type::text) = 'whatsapp'
               AND regexp_replace(COALESCE(
                     metadata->'last_refresh_response'->>'connectedNumber',
                     metadata->'last_connect_response'->>'connectedNumber',
@@ -921,16 +921,20 @@ class PostgresMessageWriter {
     }
 
     private resolveMessageType(msg: proto.IWebMessageInfo): string {
-        const message = msg.message;
+        const message = this.normalizeMessage(msg.message);
         if (!message) return 'unknown';
 
         if (message.conversation || message.extendedTextMessage) return 'text';
+        if (message.contactMessage) return 'contact';
+        if (message.contactsArrayMessage) return 'contacts';
         if (message.imageMessage) return 'image';
         if (message.videoMessage) return 'video';
         if (message.audioMessage) return 'audio';
         if (message.documentMessage) return 'document';
         if (message.stickerMessage) return 'sticker';
         if (message.reactionMessage) return 'reaction';
+        if (message.locationMessage) return 'location';
+        if (message.liveLocationMessage) return 'live_location';
 
         const key = Object.keys(message)[0];
         return key || 'unknown';
@@ -999,7 +1003,7 @@ class PostgresMessageWriter {
     }
 
     private resolveTextContent(msg: proto.IWebMessageInfo): string | null {
-        const message = msg.message;
+        const message = this.normalizeMessage(msg.message);
         if (!message) return null;
 
         return (
@@ -1007,8 +1011,102 @@ class PostgresMessageWriter {
             message.extendedTextMessage?.text ||
             message.imageMessage?.caption ||
             message.videoMessage?.caption ||
+            message.documentMessage?.caption ||
+            this.resolveContactTextContent(message) ||
+            this.resolveLocationTextContent(message) ||
+            this.resolveMediaTextContent(message) ||
             null
         );
+    }
+
+    private normalizeMessage(message?: proto.IMessage | null): proto.IMessage | null {
+        let current: any = message;
+
+        while (current) {
+            if (current.ephemeralMessage?.message) {
+                current = current.ephemeralMessage.message;
+                continue;
+            }
+            if (current.viewOnceMessage?.message) {
+                current = current.viewOnceMessage.message;
+                continue;
+            }
+            if (current.viewOnceMessageV2?.message) {
+                current = current.viewOnceMessageV2.message;
+                continue;
+            }
+            if (current.viewOnceMessageV2Extension?.message) {
+                current = current.viewOnceMessageV2Extension.message;
+                continue;
+            }
+            if (current.documentWithCaptionMessage?.message) {
+                current = current.documentWithCaptionMessage.message;
+                continue;
+            }
+            break;
+        }
+
+        return current || null;
+    }
+
+    private resolveContactTextContent(message: proto.IMessage): string | null {
+        const contact = message.contactMessage as any;
+        if (contact) {
+            const displayName = contact.displayName || contact.display_name || 'Contact';
+            const phone = this.extractPhoneFromVCard(contact.vcard);
+            return phone ? `${displayName} (${phone})` : displayName;
+        }
+
+        const contactsMessage = message.contactsArrayMessage as any;
+        const contacts = Array.isArray(contactsMessage?.contacts) ? contactsMessage.contacts : [];
+        if (contacts.length === 0) return null;
+
+        const labels = contacts
+            .slice(0, 5)
+            .map((item: any) => {
+                const displayName = item.displayName || item.display_name || 'Contact';
+                const phone = this.extractPhoneFromVCard(item.vcard);
+                return phone ? `${displayName} (${phone})` : displayName;
+            });
+
+        const suffix = contacts.length > labels.length ? ` +${contacts.length - labels.length} more` : '';
+        return `Contacts: ${labels.join(', ')}${suffix}`;
+    }
+
+    private resolveLocationTextContent(message: proto.IMessage): string | null {
+        const location = (message.locationMessage || message.liveLocationMessage) as any;
+        if (!location) return null;
+
+        const name = location.name || location.address;
+        const latitude = location.degreesLatitude;
+        const longitude = location.degreesLongitude;
+        const coordinates = latitude !== undefined && longitude !== undefined ? `${latitude},${longitude}` : null;
+
+        if (name && coordinates) return `${name} (${coordinates})`;
+        return name || coordinates || 'Location';
+    }
+
+    private resolveMediaTextContent(message: proto.IMessage): string | null {
+        if (message.audioMessage) return (message.audioMessage as any).ptt ? 'Voice note' : 'Audio';
+        if (message.stickerMessage) return 'Sticker';
+
+        const documentMessage = message.documentMessage as any;
+        if (documentMessage?.fileName) return documentMessage.fileName;
+
+        return null;
+    }
+
+    private extractPhoneFromVCard(vcard?: string | null): string | null {
+        if (!vcard) return null;
+
+        const telLine = vcard
+            .split(/\r?\n/)
+            .find(line => /^TEL/i.test(line));
+        if (!telLine) return null;
+
+        const rawValue = telLine.split(':').slice(1).join(':').trim();
+        const digits = rawValue.replace(/[^\d+]/g, '');
+        return digits || null;
     }
 }
 

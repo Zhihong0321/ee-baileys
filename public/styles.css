@@ -96,7 +96,8 @@ h1 {
 }
 
 input,
-textarea {
+textarea,
+select {
   background: #0b1117;
   border: 1px solid var(--border);
   color: var(--text);
@@ -221,6 +222,84 @@ button.danger {
   margin-top: 16px;
   color: var(--muted);
   overflow: auto;
+}
+
+.log-controls {
+  margin: 12px 0 16px;
+}
+
+.webhook-fire-list {
+  overflow: auto;
+  max-height: 420px;
+}
+
+.webhook-fire-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.webhook-fire-row.selected {
+  background: rgba(100, 210, 255, 0.08);
+  margin: 0 -8px;
+  padding: 10px 8px;
+  border-radius: 8px;
+}
+
+.webhook-fire-main {
+  min-width: 0;
+}
+
+.webhook-fire-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.result-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 9px;
+}
+
+.result-dot.ok {
+  background: var(--accent-2);
+}
+
+.result-dot.failed {
+  background: var(--danger);
+}
+
+.webhook-fire-url,
+.webhook-fire-meta,
+.webhook-fire-error {
+  margin-top: 4px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.webhook-fire-url,
+.webhook-fire-meta {
+  color: var(--muted);
+}
+
+.webhook-fire-error {
+  color: var(--danger);
+}
+
+.webhook-fire-open {
+  flex: 0 0 auto;
+}
+
+.webhook-fire-detail {
+  max-height: 520px;
+  white-space: pre-wrap;
 }
 
 .docs-grid {

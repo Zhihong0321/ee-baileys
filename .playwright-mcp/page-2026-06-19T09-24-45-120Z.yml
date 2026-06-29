@@ -1,0 +1,131 @@
+- main [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - paragraph [ref=e5]: Baileys Multi-API
+      - heading "WhatsApp API Dashboard" [level=1] [ref=e6]
+      - paragraph [ref=e7]: Create sessions, scan QR codes, and send messages from one place.
+      - paragraph [ref=e8]:
+        - link "Open Full Health" [ref=e9] [cursor=pointer]:
+          - /url: /full-health
+        - text: ·
+        - link "Open Full API Docs" [ref=e10] [cursor=pointer]:
+          - /url: /api-docs.html
+    - generic [ref=e11]: Checking server…
+  - generic [ref=e12]:
+    - heading "Session Control" [level=2] [ref=e13]
+    - generic [ref=e14]:
+      - generic [ref=e15]:
+        - generic [ref=e16]: Session ID
+        - textbox "Session ID" [ref=e17]:
+          - /placeholder: e.g. agent-01
+      - generic [ref=e18]:
+        - button "Create / Init" [ref=e19] [cursor=pointer]
+        - button "Refresh QR" [ref=e20] [cursor=pointer]
+        - button "Delete Session" [ref=e21] [cursor=pointer]
+    - generic [ref=e22]:
+      - generic [ref=e24]: QR will appear here
+      - generic [ref=e25]:
+        - paragraph [ref=e26]: No session yet.
+        - paragraph [ref=e27]: Scan the QR with WhatsApp to connect.
+  - generic [ref=e28]:
+    - heading "Session Webhook" [level=2] [ref=e29]
+    - paragraph [ref=e30]: Set where incoming messages for one session are sent automatically.
+    - generic [ref=e31]:
+      - generic [ref=e32]:
+        - generic [ref=e33]: Session ID
+        - textbox "Session ID" [ref=e34]:
+          - /placeholder: agent-01
+      - generic [ref=e35]:
+        - generic [ref=e36]: Webhook URL
+        - textbox "Webhook URL" [ref=e37]:
+          - /placeholder: https://example.com/whatsapp/inbound
+      - generic [ref=e38]:
+        - button "Save Webhook" [ref=e39] [cursor=pointer]
+        - button "Load Current" [ref=e40] [cursor=pointer]
+        - button "Remove Webhook" [ref=e41] [cursor=pointer]
+  - generic [ref=e43]:
+    - heading "Webhook Fire Log" [level=2] [ref=e44]
+    - paragraph [ref=e45]: Every webhook this server has fired (newest first), including request payloads and response bodies.
+    - generic [ref=e46]:
+      - generic [ref=e47]:
+        - generic [ref=e48]: Session ID
+        - textbox "Session ID" [ref=e49]:
+          - /placeholder: all sessions
+      - generic [ref=e50]:
+        - generic [ref=e51]: Webhook Type
+        - combobox "Webhook Type" [ref=e52]:
+          - option "All" [selected]
+          - option "Session"
+          - option "Global"
+          - option "OTP"
+      - generic [ref=e53]:
+        - generic [ref=e54]: Status
+        - combobox "Status" [ref=e55]:
+          - option "All" [selected]
+          - option "Success"
+          - option "Failed"
+      - generic [ref=e56]:
+        - generic [ref=e57]: Limit
+        - spinbutton "Limit" [ref=e58]: "100"
+    - generic [ref=e59]:
+      - button "Refresh" [ref=e60] [cursor=pointer]
+      - 'button "Auto-refresh: Off" [ref=e61] [cursor=pointer]'
+      - button "Clear Log" [ref=e62] [cursor=pointer]
+    - generic [ref=e64]:
+      - generic [ref=e65]:
+        - generic [ref=e66]:
+          - generic [ref=e68]: 2026-06-19 09:24:17
+          - generic [ref=e69]: global
+          - generic [ref=e70]: qr
+          - generic [ref=e71]: —
+          - generic [ref=e72]: 26ms
+        - generic [ref=e73]: http://localhost:4000/webhook
+        - generic [ref=e74]: session debug-session-1770961191585 · from unknown
+      - button "Open Full Log" [ref=e75] [cursor=pointer]
+    - generic [ref=e76]: Select a webhook fire to inspect the full request and response.
+  - generic [ref=e77]:
+    - heading "Send Message" [level=2] [ref=e78]
+    - generic [ref=e79]:
+      - generic [ref=e80]:
+        - generic [ref=e81]: Session ID
+        - textbox "Session ID" [ref=e82]:
+          - /placeholder: agent-01
+      - generic [ref=e83]:
+        - generic [ref=e84]: To (phone number)
+        - textbox "To (phone number)" [ref=e85]:
+          - /placeholder: "14155552671"
+      - generic [ref=e86]:
+        - generic [ref=e87]: Message
+        - textbox "Message" [ref=e88]:
+          - /placeholder: Hello from Baileys…
+      - button "Send" [ref=e90] [cursor=pointer]
+  - generic [ref=e92]:
+    - heading "Simulate Inbound" [level=2] [ref=e93]
+    - paragraph [ref=e94]: Create a fake incoming WhatsApp text and verify that Postgres wrote the message and assigned a thread.
+    - generic [ref=e95]:
+      - generic [ref=e96]:
+        - generic [ref=e97]: Session ID
+        - textbox "Session ID" [ref=e98]:
+          - /placeholder: optional if recipient phone is known
+      - generic [ref=e99]:
+        - generic [ref=e100]: Recipient WhatsApp Number
+        - textbox "Recipient WhatsApp Number" [ref=e101]:
+          - /placeholder: e.g. 60182920127
+      - generic [ref=e102]:
+        - generic [ref=e103]: Sender Phone
+        - textbox "Sender Phone" [ref=e104]:
+          - /placeholder: e.g. 60126881912
+      - generic [ref=e105]:
+        - generic [ref=e106]: Push Name
+        - textbox "Push Name" [ref=e107]:
+          - /placeholder: e.g. Test Customer
+      - generic [ref=e108]:
+        - generic [ref=e109]: Message
+        - textbox "Message" [ref=e110]:
+          - /placeholder: Simulation inbound message
+      - button "Run Simulation" [ref=e112] [cursor=pointer]
+  - generic [ref=e114]:
+    - heading "Active Sessions" [level=2] [ref=e115]
+    - paragraph [ref=e116]: The dashboard shows the connected WhatsApp number first, with the internal session ID underneath when available.
+    - button "Refresh List" [ref=e118] [cursor=pointer]
+    - list
